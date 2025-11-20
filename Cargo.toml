@@ -1,0 +1,18 @@
+[package]
+name = "peko"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+tokio = { version = "1.48.0", features = ["full"] }
+wasmtime = { version = "38.0.4", features = [
+    "runtime",
+    "component-model",
+    "component-model-async",
+] }
+memberlist = { version = "0.7", features = ["snappy", "tokio", "quinn"] }
+wasmtime-wasi = { version = "38.0.4", default-features = false, features = [
+    "p2",
+] }
+hyper = { version = "1.8.1", features = ["server"] }
+sonic-rs = "0.5.6"
