@@ -34,6 +34,7 @@ Peko is a FaaS platform powered by [wasmtime](https://github.com/bytecodeallianc
 ## Supported Code Providers
 
 - File System (Including NFS like AWS EFS)
+- S3 and compatible storages
 
 ## Internal Implementation
 

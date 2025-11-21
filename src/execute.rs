@@ -1,4 +1,5 @@
 use crate::wasm_code_provider::{self, WasmCodeProvider};
+use bytes::Bytes;
 use tokio::sync::{
     mpsc::{Receiver, UnboundedReceiver, UnboundedSender, unbounded_channel},
     oneshot,
@@ -158,7 +159,7 @@ mod tests {
 
     #[derive(Clone)]
     struct MockWasmCodeProvider {
-        codes: HashMap<String, Vec<u8>>,
+        codes: HashMap<String, Bytes>,
     }
 
     impl MockWasmCodeProvider {
@@ -169,13 +170,13 @@ mod tests {
         }
 
         fn with_code(mut self, id: &str, wasm_bytes: Vec<u8>) -> Self {
-            self.codes.insert(id.to_string(), wasm_bytes);
+            self.codes.insert(id.to_string(), Bytes::from(wasm_bytes));
             self
         }
     }
 
     impl WasmCodeProvider for MockWasmCodeProvider {
-        async fn get_wasm_code(&self, id: &str) -> wasm_code_provider::Result<Vec<u8>> {
+        async fn get_wasm_code(&self, id: &str) -> wasm_code_provider::Result<Bytes> {
             self.codes
                 .get(id)
                 .cloned()

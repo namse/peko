@@ -1,13 +1,18 @@
 pub mod fs;
+pub mod s3;
+
+use bytes::Bytes;
+use std::future::Future;
 
 #[derive(Debug)]
 pub enum Error {
     NotFound,
     IoError { error: std::io::Error },
+    ProviderError(anyhow::Error),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
 
 pub trait WasmCodeProvider: Clone + Send + Sync + 'static {
-    fn get_wasm_code(&self, id: &str) -> impl Future<Output = Result<Vec<u8>>> + Send;
+    fn get_wasm_code(&self, id: &str) -> impl Future<Output = Result<Bytes>> + Send;
 }

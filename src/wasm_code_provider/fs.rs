@@ -1,4 +1,5 @@
 use super::*;
+use bytes::Bytes;
 use std::path::PathBuf;
 
 #[derive(Clone)]
@@ -6,11 +7,17 @@ pub struct FsCodeProvider {
     base_path: PathBuf,
 }
 
+impl FsCodeProvider {
+    pub fn new(base_path: PathBuf) -> Self {
+        Self { base_path }
+    }
+}
+
 impl WasmCodeProvider for FsCodeProvider {
-    async fn get_wasm_code(&self, id: &str) -> Result<Vec<u8>> {
+    async fn get_wasm_code(&self, id: &str) -> Result<Bytes> {
         let path = self.base_path.join(id);
         match tokio::fs::read(path).await {
-            Ok(code) => Ok(code),
+            Ok(code) => Ok(Bytes::from(code)),
             Err(error) => {
                 if error.kind() == std::io::ErrorKind::NotFound {
                     return Err(Error::NotFound);
