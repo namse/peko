@@ -65,7 +65,7 @@ impl<Wcp: WasmCodeProvider> Executor<Wcp> {
                 free_instance
             } else {
                 let result =
-                    MyInstance::new(request.code_id, engine, linker, wasm_code_provider).await;
+                    MyInstance::new(&request.code_id, &engine, &linker, wasm_code_provider).await;
                 match result {
                     Ok(instance) => instance,
                     Err(error) => {
@@ -116,18 +116,19 @@ impl MyInstance {
     }
 
     async fn new<Wcp: WasmCodeProvider>(
-        code_id: String,
-        engine: Engine,
-        linker: component::Linker<()>,
+        code_id: &str,
+        engine: &Engine,
+        linker: &component::Linker<()>,
         wasm_code_provider: Wcp,
     ) -> Result<Self, Error> {
-        let wasm_code = wasm_code_provider.get_wasm_code(&code_id).await?;
-        let component = Component::new(&engine, wasm_code)?;
-
+        let instance_pre = wasm_code_provider
+            .get_instance_pre(code_id, engine, linker)
+            .await?;
         let mut store = Store::new(&engine, ());
-        let instance = linker.instantiate(&mut store, &component)?;
+        let instance = instance_pre.instantiate(&mut store)?;
+
         Ok(MyInstance {
-            code_id,
+            code_id: code_id.to_string(),
             inner: instance,
             store,
         })
@@ -176,7 +177,12 @@ mod tests {
     }
 
     impl WasmCodeProvider for MockWasmCodeProvider {
-        async fn get_wasm_code(&self, id: &str) -> wasm_code_provider::Result<Bytes> {
+        async fn get_instance_pre(
+            &self,
+            id: &str,
+            engine: &Engine,
+            linker: &component::Linker<()>,
+        ) -> wasm_code_provider::Result<InstancePre<()>> {
             self.codes
                 .get(id)
                 .cloned()
@@ -418,9 +424,9 @@ mod tests {
         assert!(executor.try_pop_free_instance("test-component").is_none());
 
         let instance = MyInstance::new(
-            "test-component".to_string(),
-            executor.engine.clone(),
-            executor.linker.clone(),
+            "test-component",
+            &executor.engine,
+            &executor.linker,
             executor.wasm_code_provider.clone(),
         )
         .await
@@ -445,9 +451,9 @@ mod tests {
         let mut executor = Executor::new(engine, provider, rx);
 
         let instance = MyInstance::new(
-            "component-a".to_string(),
-            executor.engine.clone(),
-            executor.linker.clone(),
+            "component-a",
+            &executor.engine,
+            &executor.linker,
             executor.wasm_code_provider.clone(),
         )
         .await
@@ -466,21 +472,16 @@ mod tests {
         let provider =
             MockWasmCodeProvider::new().with_code("test-component", create_test_component_bytes());
 
-        let mut instance = MyInstance::new(
-            "test-component".to_string(),
-            engine.clone(),
-            linker.clone(),
-            provider.clone(),
-        )
-        .await
-        .unwrap();
+        let mut instance = MyInstance::new("test-component", &engine, &linker, provider.clone())
+            .await
+            .unwrap();
 
         let result = instance
             .execute("add", &[Val::U32(7), Val::U32(3)])
             .unwrap();
         assert_eq!(result, vec![Val::U32(10)]);
 
-        let mut instance2 = MyInstance::new("test-component".to_string(), engine, linker, provider)
+        let mut instance2 = MyInstance::new("test-component", &engine, &linker, provider.clone())
             .await
             .unwrap();
 
@@ -497,7 +498,7 @@ mod tests {
         let provider =
             MockWasmCodeProvider::new().with_code("test-component", create_test_component_bytes());
 
-        let mut instance = MyInstance::new("test-component".to_string(), engine, linker, provider)
+        let mut instance = MyInstance::new("test-component", &engine, &linker, provider.clone())
             .await
             .unwrap();
 
@@ -511,8 +512,7 @@ mod tests {
         let linker = component::Linker::new(&engine);
         let provider = MockWasmCodeProvider::new();
 
-        let result =
-            MyInstance::new("invalid-component".to_string(), engine, linker, provider).await;
+        let result = MyInstance::new("invalid-component", &engine, &linker, provider.clone()).await;
 
         assert!(matches!(result, Err(Error::WasmCodeProvider(_))));
     }
