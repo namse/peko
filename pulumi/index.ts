@@ -4,3 +4,4 @@ export { OciComputeWorker, OciRegion } from "./OciComputeWorker";
 export { B2CloudflareStaticCdn } from "./B2CloudflareStaticCdn";
 export * as buildChain from "./buildChain";
 export * as docDb from "./docDb";
+export { OciHeadQuarter } from "./OciHeadQuarter";

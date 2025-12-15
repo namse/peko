@@ -6,6 +6,7 @@ config:
   fn0Cloud:DOMAIN: fn0.dev
   fn0Cloud:AWS_WATCHDOG_REGION: ap-northeast-1
   fn0Cloud:OCI_COMPUTE_WORKER_REGION: ap-osaka-1
+  fn0Cloud:OCI_HEAD_QUARTER_REGION: ap-osaka-1
   aws:region: ap-northeast-1
   aws:accessKey:
     secure: AAABANYKJJlI5paWj29+JE4VPfm/vu66suHHh98qFQNYWW7LflXma6qdmKMiDdSfaYqFMQ==

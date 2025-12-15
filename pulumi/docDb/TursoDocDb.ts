@@ -18,29 +18,45 @@ export class TursoDocDb extends pulumi.ComponentResource {
     super("pkg:index:turso-doc-db", name, args, opts);
     const { location, organizationSlug } = args;
 
-    const group = new TursoGroup("group", {
-      organizationSlug,
-      name: "fn0-doc-db",
-      location,
-    });
+    const group = new TursoGroup(
+      "group",
+      {
+        organizationSlug,
+        name: "fn0-doc-db",
+        location,
+      },
+      { parent: this }
+    );
 
-    const database = new TursoDatabase("database", {
-      organizationSlug,
-      name: "fn0-doc-db",
-      group: group.name,
-    });
+    const database = new TursoDatabase(
+      "database",
+      {
+        organizationSlug,
+        name: "fn0-doc-db",
+        group: group.name,
+      },
+      { parent: this }
+    );
 
-    const token = new TursoDatabaseToken("token", {
-      organizationSlug,
-      databaseName: database.name,
-    });
+    const token = new TursoDatabaseToken(
+      "token",
+      {
+        organizationSlug,
+        databaseName: database.name,
+      },
+      { parent: this }
+    );
 
-    new TursoTable("docs-table", {
-      organizationSlug,
-      jwt: token.jwt,
-      databaseName: database.name,
-      createTableSql:
-        "CREATE TABLE IF NOT EXISTS docs (key TEXT PRIMARY KEY, value TEXT)",
-    });
+    new TursoTable(
+      "docs-table",
+      {
+        organizationSlug,
+        jwt: token.jwt,
+        databaseName: database.name,
+        createTableSql:
+          "CREATE TABLE IF NOT EXISTS docs (key TEXT PRIMARY KEY, value TEXT)",
+      },
+      { parent: this }
+    );
   }
 }

@@ -18,59 +18,78 @@ export class AwsWasmS3 extends pulumi.ComponentResource {
 
     const { region } = args;
 
-    const wasmBucket = new aws.s3.Bucket("wasm-bucket", {
-      region,
-    });
+    const wasmBucket = new aws.s3.Bucket(
+      "wasm-bucket",
+      {
+        region,
+      },
+      { parent: this }
+    );
     this.bucket = wasmBucket.bucket;
 
-    new aws.s3.BucketLifecycleConfiguration("wasm-bucket-lifecycle", {
-      region,
-      bucket: wasmBucket.bucket,
-      rules: [
-        {
-          id: "wasm-bucket-lifecycle-rule",
-          status: "Enabled",
-          expiration: {
-            days: 1,
+    new aws.s3.BucketLifecycleConfiguration(
+      "wasm-bucket-lifecycle",
+      {
+        region,
+        bucket: wasmBucket.bucket,
+        rules: [
+          {
+            id: "wasm-bucket-lifecycle-rule",
+            status: "Enabled",
+            expiration: {
+              days: 1,
+            },
           },
-        },
-      ],
-    });
+        ],
+      },
+      { parent: this }
+    );
 
-    const queue = new aws.sqs.Queue("queue", {
-      region,
-      fifoQueue: true,
-    });
+    const queue = new aws.sqs.Queue(
+      "queue",
+      {
+        region,
+        fifoQueue: true,
+      },
+      { parent: this }
+    );
     this.queueArn = queue.arn;
 
-    const queuePolicyDoc = aws.iam.getPolicyDocumentOutput({
-      statements: [
-        {
-          effect: "Allow",
-          principals: [
-            {
-              type: "Service",
-              identifiers: ["s3.amazonaws.com"],
-            },
-          ],
-          actions: ["sqs:SendMessage"],
-          resources: [queue.arn],
-          conditions: [
-            {
-              test: "ArnEquals",
-              variable: "aws:SourceArn",
-              values: [wasmBucket.arn],
-            },
-          ],
-        },
-      ],
-    });
+    const queuePolicyDoc = aws.iam.getPolicyDocumentOutput(
+      {
+        statements: [
+          {
+            effect: "Allow",
+            principals: [
+              {
+                type: "Service",
+                identifiers: ["s3.amazonaws.com"],
+              },
+            ],
+            actions: ["sqs:SendMessage"],
+            resources: [queue.arn],
+            conditions: [
+              {
+                test: "ArnEquals",
+                variable: "aws:SourceArn",
+                values: [wasmBucket.arn],
+              },
+            ],
+          },
+        ],
+      },
+      { parent: this }
+    );
 
-    const queuePolicy = new aws.sqs.QueuePolicy("allow-s3-send-message", {
-      region,
-      queueUrl: queue.id,
-      policy: queuePolicyDoc.json,
-    });
+    const queuePolicy = new aws.sqs.QueuePolicy(
+      "allow-s3-send-message",
+      {
+        region,
+        queueUrl: queue.id,
+        policy: queuePolicyDoc.json,
+      },
+      { parent: this }
+    );
 
     new aws.s3.BucketNotification(
       "bucket-notification",
@@ -84,7 +103,7 @@ export class AwsWasmS3 extends pulumi.ComponentResource {
           },
         ],
       },
-      { dependsOn: [queuePolicy] }
+      { parent: this, dependsOn: [queuePolicy] }
     );
   }
 }

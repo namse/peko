@@ -39,25 +39,27 @@ const ociComputeWorker = new fn0.OciComputeWorker("ociComputeWorker", {
   watchdogIpv6CidrBlock: awsWatchdogVpc.ipv6CidrBlock,
 });
 
-const awsWatchdog = new fn0.AwsWatchdog("awsWatchdog", {
-  domain,
-  region: awsWatchdogRegion,
-  subnetId: awsWatchdogVpc.subnetId,
-  securityGroupId: awsWatchdogVpc.securityGroupId,
-  maxGracefulShutdownWaitSecs: 300,
-  maxHealthyCheckRetries: 5,
-  maxStartTimeoutSecs: 180,
-  maxStartingCount: 1,
-  ociWorkerInfraEnvs: ociComputeWorker.infraEnvs,
-  cloudflareEnvs: {
-    CLOUDFLARE_API_TOKEN: cloudflareApiToken.value,
-    CLOUDFLARE_ASTERISK_DOMAIN: `*.${domain}`,
-    CLOUDFLARE_ZONE_ID: zoneId,
-  },
-});
+// const awsWatchdog = new fn0.AwsWatchdog("awsWatchdog", {
+//   domain,
+//   region: awsWatchdogRegion,
+//   subnetId: awsWatchdogVpc.subnetId,
+//   securityGroupId: awsWatchdogVpc.securityGroupId,
+//   maxGracefulShutdownWaitSecs: 300,
+//   maxHealthyCheckRetries: 5,
+//   maxStartTimeoutSecs: 180,
+//   maxStartingCount: 1,
+//   ociWorkerInfraEnvs: ociComputeWorker.infraEnvs,
+//   cloudflareEnvs: {
+//     CLOUDFLARE_API_TOKEN: cloudflareApiToken.value,
+//     CLOUDFLARE_ASTERISK_DOMAIN: `*.${domain}`,
+//     CLOUDFLARE_ZONE_ID: zoneId,
+//   },
+// });
 
 new fn0.B2CloudflareStaticCdn("b2CloudflareStaticCdn", {
   zoneId,
 });
 
-export const watchdogLambdaFunctionName = awsWatchdog.lambdaFunctionName;
+const ociHeadQuarter = new fn0.OciHeadQuarter("ociHeadQuarter", {
+  region: config.require("OCI_HEAD_QUARTER_REGION"),
+});

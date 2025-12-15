@@ -32,108 +32,147 @@ export class CwasmS3Pusher extends pulumi.ComponentResource {
 
     const { awsS3Region, zoneId, targetBuckets } = args;
 
-    const workerSecretKey = new random.RandomPassword("worker-secret-key", {
-      length: 64,
-      special: false,
-    });
+    const workerSecretKey = new random.RandomPassword(
+      "worker-secret-key",
+      {
+        length: 64,
+        special: false,
+      },
+      { parent: this }
+    );
 
     const zone = cloudflare.Zone.get("zone", zoneId);
 
-    const worker = new cloudflare.WorkersScript("s3-pusher-worker", {
-      accountId: zone.account.apply((account) => account.id!),
-      scriptName: "s3-pusher-worker",
-      content: fs.readFile("./cwasm-s3-pusher-workers.js", "utf-8"),
-      bindings: [
-        {
-          name: "WORKER_SECRET_KEY",
-          type: "text",
-          text: workerSecretKey.result,
-        },
-      ],
-    });
+    const worker = new cloudflare.WorkersScript(
+      "s3-pusher-worker",
+      {
+        accountId: zone.account.apply((account) => account.id!),
+        scriptName: "s3-pusher-worker",
+        content: fs.readFile("./cwasm-s3-pusher-workers.js", "utf-8"),
+        bindings: [
+          {
+            name: "WORKER_SECRET_KEY",
+            type: "text",
+            text: workerSecretKey.result,
+          },
+        ],
+      },
+      { parent: this }
+    );
 
-    new cloudflare.WorkersRoute("s3-pusher-route", {
-      zoneId: zone.id,
-      pattern: pulumi.interpolate`cwasm-s3-pusher.${zone.name}/*`,
-      script: "s3-pusher-worker",
-    });
+    new cloudflare.WorkersRoute(
+      "s3-pusher-route",
+      {
+        zoneId: zone.id,
+        pattern: pulumi.interpolate`cwasm-s3-pusher.${zone.name}/*`,
+        script: "s3-pusher-worker",
+      },
+      { parent: this }
+    );
 
-    new cloudflare.DnsRecord("s3-pusher-dns", {
-      zoneId: zone.id,
-      name: "cwasm-s3-pusher",
-      type: "AAAA",
-      content: "100::",
-      ttl: 1,
-      proxied: true,
-    });
+    new cloudflare.DnsRecord(
+      "s3-pusher-dns",
+      {
+        zoneId: zone.id,
+        name: "cwasm-s3-pusher",
+        type: "AAAA",
+        content: "100::",
+        ttl: 1,
+        proxied: true,
+      },
+      { parent: this }
+    );
 
-    new cloudflare.Ruleset("s3-pusher-ruleset", {
-      zoneId: zone.id,
-      name: "s3-pusher-protection",
-      kind: "zone",
-      phase: "http_request_firewall_custom",
-      rules: [
-        {
-          action: "block",
-          expression: pulumi.interpolate`(http.host eq "cwasm-s3-pusher.${zone.name}" and not http.request.headers["x-worker-secret"][0] eq "${workerSecretKey.result}")`,
-        },
-      ],
-    });
+    new cloudflare.Ruleset(
+      "s3-pusher-ruleset",
+      {
+        zoneId: zone.id,
+        name: "s3-pusher-protection",
+        kind: "zone",
+        phase: "http_request_firewall_custom",
+        rules: [
+          {
+            action: "block",
+            expression: pulumi.interpolate`(http.host eq "cwasm-s3-pusher.${zone.name}" and not http.request.headers["x-worker-secret"][0] eq "${workerSecretKey.result}")`,
+          },
+        ],
+      },
+      { parent: this }
+    );
 
-    const cwasmZstBucket = new aws.s3.Bucket("cwasm-zst-bucket", {
-      region: awsS3Region,
-    });
+    const cwasmZstBucket = new aws.s3.Bucket(
+      "cwasm-zst-bucket",
+      {
+        region: awsS3Region,
+      },
+      { parent: this }
+    );
     this.cwasmZstBucket = cwasmZstBucket.bucket;
 
-    new aws.s3.BucketLifecycleConfiguration("cwasm-zst-lifecycle", {
-      region: awsS3Region,
-      bucket: cwasmZstBucket.bucket,
-      rules: [
-        {
-          id: "expire-1day",
-          status: "Enabled",
-          expiration: {
-            days: 1,
+    new aws.s3.BucketLifecycleConfiguration(
+      "cwasm-zst-lifecycle",
+      {
+        region: awsS3Region,
+        bucket: cwasmZstBucket.bucket,
+        rules: [
+          {
+            id: "expire-1day",
+            status: "Enabled",
+            expiration: {
+              days: 1,
+            },
           },
-        },
-      ],
-    });
+        ],
+      },
+      { parent: this }
+    );
 
-    const queue = new aws.sqs.Queue("cwasm-upload-queue", {
-      region: awsS3Region,
-      fifoQueue: true,
-      visibilityTimeoutSeconds: 90,
-    });
+    const queue = new aws.sqs.Queue(
+      "cwasm-upload-queue",
+      {
+        region: awsS3Region,
+        fifoQueue: true,
+        visibilityTimeoutSeconds: 90,
+      },
+      { parent: this }
+    );
 
     // Create SQS policy
-    const queuePolicyDoc = aws.iam.getPolicyDocumentOutput({
-      statements: [
-        {
-          effect: "Allow",
-          principals: [
-            {
-              type: "Service",
-              identifiers: ["s3.amazonaws.com"],
-            },
-          ],
-          actions: ["sqs:SendMessage"],
-          resources: [queue.arn],
-          conditions: [
-            {
-              test: "ArnEquals",
-              variable: "aws:SourceArn",
-              values: [cwasmZstBucket.arn],
-            },
-          ],
-        },
-      ],
-    });
+    const queuePolicyDoc = aws.iam.getPolicyDocumentOutput(
+      {
+        statements: [
+          {
+            effect: "Allow",
+            principals: [
+              {
+                type: "Service",
+                identifiers: ["s3.amazonaws.com"],
+              },
+            ],
+            actions: ["sqs:SendMessage"],
+            resources: [queue.arn],
+            conditions: [
+              {
+                test: "ArnEquals",
+                variable: "aws:SourceArn",
+                values: [cwasmZstBucket.arn],
+              },
+            ],
+          },
+        ],
+      },
+      { parent: this }
+    );
 
-    const queuePolicy = new aws.sqs.QueuePolicy("cwasm-queue-policy", {
-      region: awsS3Region,
-      queueUrl: queue.id,
-      policy: queuePolicyDoc.json,
-    });
+    const queuePolicy = new aws.sqs.QueuePolicy(
+      "cwasm-queue-policy",
+      {
+        region: awsS3Region,
+        queueUrl: queue.id,
+        policy: queuePolicyDoc.json,
+      },
+      { parent: this }
+    );
 
     // Create S3 bucket notification
     new aws.s3.BucketNotification(
@@ -163,58 +202,74 @@ export class CwasmS3Pusher extends pulumi.ComponentResource {
     );
 
     // Create CloudFront key pair
-    const privateKey = new tls.PrivateKey("cloudfront-key", {
-      algorithm: "RSA",
-      rsaBits: 2048,
-    });
+    const privateKey = new tls.PrivateKey(
+      "cloudfront-key",
+      {
+        algorithm: "RSA",
+        rsaBits: 2048,
+      },
+      { parent: this }
+    );
 
-    const publicKey = new aws.cloudfront.PublicKey("cloudfront-public-key", {
-      encodedKey: privateKey.publicKeyPem,
-      name: "cwasm-key-pair",
-      comment: "Key for signing cwasm.zst URLs",
-    });
+    const publicKey = new aws.cloudfront.PublicKey(
+      "cloudfront-public-key",
+      {
+        encodedKey: privateKey.publicKeyPem,
+        name: "cwasm-key-pair",
+        comment: "Key for signing cwasm.zst URLs",
+      },
+      { parent: this }
+    );
 
-    const keyGroup = new aws.cloudfront.KeyGroup("cloudfront-key-group", {
-      items: [publicKey.id],
-      name: "cwasm-key-group",
-      comment: "Trusted key group for cwasm.zst",
-    });
+    const keyGroup = new aws.cloudfront.KeyGroup(
+      "cloudfront-key-group",
+      {
+        items: [publicKey.id],
+        name: "cwasm-key-group",
+        comment: "Trusted key group for cwasm.zst",
+      },
+      { parent: this }
+    );
 
     // Create CloudFront distribution
-    const distribution = new aws.cloudfront.Distribution("cwasm-distribution", {
-      origins: [
-        {
-          domainName: cwasmZstBucket.bucketRegionalDomainName,
-          originAccessControlId: originAccessControl.id,
-          originId: "cwasmS3Origin",
+    const distribution = new aws.cloudfront.Distribution(
+      "cwasm-distribution",
+      {
+        origins: [
+          {
+            domainName: cwasmZstBucket.bucketRegionalDomainName,
+            originAccessControlId: originAccessControl.id,
+            originId: "cwasmS3Origin",
+          },
+        ],
+        enabled: true,
+        defaultCacheBehavior: {
+          targetOriginId: "cwasmS3Origin",
+          viewerProtocolPolicy: "https-only",
+          allowedMethods: ["GET", "HEAD"],
+          cachedMethods: ["GET", "HEAD"],
+          trustedKeyGroups: [keyGroup.id],
+          forwardedValues: {
+            queryString: false,
+            cookies: {
+              forward: "none",
+            },
+          },
+          minTtl: 0,
+          defaultTtl: 0,
+          maxTtl: 0,
         },
-      ],
-      enabled: true,
-      defaultCacheBehavior: {
-        targetOriginId: "cwasmS3Origin",
-        viewerProtocolPolicy: "https-only",
-        allowedMethods: ["GET", "HEAD"],
-        cachedMethods: ["GET", "HEAD"],
-        trustedKeyGroups: [keyGroup.id],
-        forwardedValues: {
-          queryString: false,
-          cookies: {
-            forward: "none",
+        restrictions: {
+          geoRestriction: {
+            restrictionType: "none",
           },
         },
-        minTtl: 0,
-        defaultTtl: 0,
-        maxTtl: 0,
-      },
-      restrictions: {
-        geoRestriction: {
-          restrictionType: "none",
+        viewerCertificate: {
+          cloudfrontDefaultCertificate: true,
         },
       },
-      viewerCertificate: {
-        cloudfrontDefaultCertificate: true,
-      },
-    });
+      { parent: this }
+    );
 
     // Update S3 bucket policy
     const bucketPolicyDoc = pulumi
@@ -241,54 +296,62 @@ export class CwasmS3Pusher extends pulumi.ComponentResource {
         } satisfies aws.iam.PolicyDocument)
       );
 
-    new aws.s3.BucketPolicy("cwasm-bucket-policy", {
-      bucket: cwasmZstBucket.id,
-      policy: bucketPolicyDoc,
-    });
+    new aws.s3.BucketPolicy(
+      "cwasm-bucket-policy",
+      {
+        bucket: cwasmZstBucket.id,
+        policy: bucketPolicyDoc,
+      },
+      { parent: this }
+    );
 
     // Create Lambda IAM role
     const cwasmZstBucketArn = pulumi.interpolate`arn:aws:s3:::${cwasmZstBucket.bucket}`;
 
-    const lambdaRole = new aws.iam.Role("s3-pusher-lambda-role", {
-      assumeRolePolicy: {
-        Version: "2012-10-17",
-        Statement: [
-          {
-            Effect: "Allow",
-            Principal: {
-              Service: "lambda.amazonaws.com",
+    const lambdaRole = new aws.iam.Role(
+      "s3-pusher-lambda-role",
+      {
+        assumeRolePolicy: {
+          Version: "2012-10-17",
+          Statement: [
+            {
+              Effect: "Allow",
+              Principal: {
+                Service: "lambda.amazonaws.com",
+              },
+              Action: "sts:AssumeRole",
             },
-            Action: "sts:AssumeRole",
+          ],
+        },
+        inlinePolicies: [
+          {
+            name: "s3-cloudfront-access",
+            policy: cwasmZstBucketArn.apply((bucketArn) =>
+              JSON.stringify({
+                Version: "2012-10-17",
+                Statement: [
+                  {
+                    Effect: "Allow",
+                    Action: ["s3:GetObject", "s3:DeleteObject"],
+                    Resource: `${bucketArn}/*`,
+                  },
+                  {
+                    Effect: "Allow",
+                    Action: ["s3:ListBucket"],
+                    Resource: bucketArn,
+                  },
+                ],
+              } satisfies aws.iam.PolicyDocument)
+            ),
           },
         ],
+        managedPolicyArns: [
+          aws.iam.ManagedPolicy.AWSLambdaBasicExecutionRole,
+          aws.iam.ManagedPolicy.AWSLambdaSQSQueueExecutionRole,
+        ],
       },
-      inlinePolicies: [
-        {
-          name: "s3-cloudfront-access",
-          policy: cwasmZstBucketArn.apply((bucketArn) =>
-            JSON.stringify({
-              Version: "2012-10-17",
-              Statement: [
-                {
-                  Effect: "Allow",
-                  Action: ["s3:GetObject", "s3:DeleteObject"],
-                  Resource: `${bucketArn}/*`,
-                },
-                {
-                  Effect: "Allow",
-                  Action: ["s3:ListBucket"],
-                  Resource: bucketArn,
-                },
-              ],
-            } satisfies aws.iam.PolicyDocument)
-          ),
-        },
-      ],
-      managedPolicyArns: [
-        aws.iam.ManagedPolicy.AWSLambdaBasicExecutionRole,
-        aws.iam.ManagedPolicy.AWSLambdaSQSQueueExecutionRole,
-      ],
-    });
+      { parent: this }
+    );
 
     const lambda = new aws.lambda.CallbackFunction<aws.sqs.QueueEvent, void>(
       "s3-pusher-lambda",
@@ -405,11 +468,15 @@ export class CwasmS3Pusher extends pulumi.ComponentResource {
       }
     );
 
-    new aws.lambda.EventSourceMapping("s3-pusher-trigger", {
-      region: awsS3Region,
-      eventSourceArn: queue.arn,
-      functionName: lambda.name,
-      batchSize: 1,
-    });
+    new aws.lambda.EventSourceMapping(
+      "s3-pusher-trigger",
+      {
+        region: awsS3Region,
+        eventSourceArn: queue.arn,
+        functionName: lambda.name,
+        batchSize: 1,
+      },
+      { parent: this }
+    );
   }
 }

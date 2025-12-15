@@ -21,22 +21,30 @@ export class AwsLambdaCwasmCompiler extends pulumi.ComponentResource {
 
     const wasmtimeVersion = "39.0.1";
 
-    const wasmtimeLayer = new aws.lambda.LayerVersion("wasmtime-layer", {
-      region,
-      layerName: wasmtimeVersion,
-      code: new pulumi.asset.FileArchive(
-        path.join(
-          __dirname,
-          `./wasmtime-v${wasmtimeVersion}-x86_64-linux.tar.xz`
-        )
-      ),
-    });
+    const wasmtimeLayer = new aws.lambda.LayerVersion(
+      "wasmtime-layer",
+      {
+        region,
+        layerName: wasmtimeVersion,
+        code: new pulumi.asset.FileArchive(
+          path.join(
+            __dirname,
+            `./wasmtime-v${wasmtimeVersion}-x86_64-linux.tar.xz`
+          )
+        ),
+      },
+      { parent: this }
+    );
 
-    const zstdLayer = new aws.lambda.LayerVersion("zstd-layer", {
-      region,
-      layerName: "zstd-1.5.5-1",
-      code: new pulumi.asset.FileArchive(path.join(__dirname, "./zstd")),
-    });
+    const zstdLayer = new aws.lambda.LayerVersion(
+      "zstd-layer",
+      {
+        region,
+        layerName: "zstd-1.5.5-1",
+        code: new pulumi.asset.FileArchive(path.join(__dirname, "./zstd")),
+      },
+      { parent: this }
+    );
 
     const wasmBucketArn = pulumi.interpolate`arn:aws:s3:::${wasmBucket}`;
     const cWasmBucketArn = pulumi.interpolate`arn:aws:s3:::${cWasmBucket}`;
@@ -193,14 +201,19 @@ export class AwsLambdaCwasmCompiler extends pulumi.ComponentResource {
             aws.iam.ManagedPolicy.AWSLambdaSQSQueueExecutionRole,
           ],
         }).arn,
-      }
+      },
+      { parent: this }
     );
 
-    new aws.lambda.EventSourceMapping("sqs-trigger", {
-      region,
-      eventSourceArn: queueArn,
-      functionName: lambda.name,
-      batchSize: 1,
-    });
+    new aws.lambda.EventSourceMapping(
+      "sqs-trigger",
+      {
+        region,
+        eventSourceArn: queueArn,
+        functionName: lambda.name,
+        batchSize: 1,
+      },
+      { parent: this }
+    );
   }
 }
