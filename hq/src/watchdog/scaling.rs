@@ -1,44 +1,38 @@
-use crate::watchdog::{
-    health_recorder::{HealthState, InMemoryHealthRecorder},
-    host_infra::HostInfra,
-    Context,
-};
+use crate::watchdog::{host_infra::HostInfra, host_registry::InMemoryHostRegistry, Context};
+use chrono::Utc;
 
 pub async fn try_scale_out(
-    context: &Context,
-    health_recorder: &InMemoryHealthRecorder,
+    _context: &Context,
+    host_registry: &InMemoryHostRegistry,
     host_infra: &dyn HostInfra,
 ) -> color_eyre::Result<()> {
-    let starting_count = health_recorder.get_starting_count().await;
+    let all_entries = host_registry.get_all_entries().await;
+    let current_time = Utc::now();
 
-    let Some(left_starting_count) = context.max_starting_count.checked_sub(starting_count) else {
-        return Ok(());
-    };
-
-    println!("left_starting_count: {left_starting_count}");
-
-    if left_starting_count == 0 {
-        println!("left_starting_count == 0. No more starting hosts allowed");
-        return Ok(());
-    }
-
-    let all_records = health_recorder.get_all_records().await;
-    let alive_host_len = all_records
+    // Grace Period 이내의 호스트 수 (starting 중인 호스트)
+    let starting_count = all_entries
         .iter()
-        .filter(|(_, record)| match record.state {
-            HealthState::Starting
-            | HealthState::Healthy { .. }
-            | HealthState::RetryingCheck { .. }
-            | HealthState::MarkedForTermination
-            | HealthState::GracefulShuttingDown => true,
-            HealthState::TerminatedConfirm | HealthState::InvisibleOnInfra => false,
+        .filter(|(_, entry)| {
+            let time_since_registration = current_time - entry.registered_at;
+            time_since_registration < chrono::Duration::seconds(30)
+                && entry.last_successful_health_check.is_none()
         })
         .count();
+
+    println!("starting_count: {starting_count}");
+
+    // 살아있는 호스트 수 (타임아웃되지 않은 호스트)
+    let alive_host_len = host_registry.get_healthy_ips().await.len();
 
     println!("alive_host_len: {alive_host_len}");
 
     if alive_host_len >= 1 {
         println!("alive_host_len >= 1. No space to launch new host instance");
+        return Ok(());
+    }
+
+    if starting_count > 0 {
+        println!("starting_count > 0. Waiting for hosts to start");
         return Ok(());
     }
 
