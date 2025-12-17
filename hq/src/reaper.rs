@@ -12,7 +12,7 @@ const HEALTH_CHECK_ELAPSED_THRESHOLD: Duration = Duration::from_secs(15);
 
 #[instrument(skip_all, name = "reaper_loop")]
 pub async fn run(
-    host_infra: Arc<dyn HostInfra>,
+    host_provider: Arc<dyn HostProvider>,
     host_info_map: HostInfoMap,
     health_check_map: HealthCheckMap,
 ) -> Result<()> {
@@ -43,17 +43,18 @@ pub async fn run(
 
         telemetry::ReaperTerminateCandidates {
             count: terminate_set.len() as f64,
-        }.send();
+        }
+        .send();
 
         for host_id in terminate_set.clone() {
             telemetry::ReaperTerminateAttempts.send();
-            let host_infra = host_infra.clone();
+            let host_provider = host_provider.clone();
             let span = tracing::info_span!("reaper_terminate_host", host_id = %host_id);
 
             tokio::spawn(
                 async move {
                     sleep(Duration::from_millis(rand::random::<u64>() % 1000)).await;
-                    let Err(err) = host_infra.terminate(&host_id).await else {
+                    let Err(err) = host_provider.terminate(&host_id).await else {
                         info!("Host terminated successfully");
                         return;
                     };

@@ -1,7 +1,9 @@
+mod args;
 mod dns;
 mod health_checker;
 mod host_id;
-mod host_infra;
+mod host_provider;
+mod params;
 mod reaper;
 mod telemetry;
 
@@ -9,13 +11,11 @@ use color_eyre::eyre::Result;
 use dashmap::DashMap;
 use health_checker::*;
 use host_id::*;
-use host_infra::*;
+use host_provider::*;
 use http_body_util::Full;
-use hyper::body::Bytes;
-use hyper::server::conn::http1;
-use hyper::service::service_fn;
-use hyper::{Request, Response};
+use hyper::{Request, Response, body::Bytes, server::conn::http1, service::service_fn};
 use hyper_util::rt::TokioIo;
+use params::HqParams;
 use std::net::SocketAddr;
 use tokio::net::TcpListener;
 use tracing::*;
@@ -24,9 +24,9 @@ fn main() -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
 
     rt.block_on(async move {
-        let providers = telemetry::setup_otlp()?;
+        let telemetry_providers = telemetry::setup_otlp()?;
+        let hq_params = HqParams::load()?;
 
-        // let host_infra = Arc::new(host_infra::oci::OciHostInfra::new());
         // let host_info_map = Arc::new(DashMap::new());
         // let health_check_map = Arc::new(DashMap::new());
 
@@ -36,11 +36,11 @@ fn main() -> Result<()> {
         };
 
         // let sync_host_info_map_future =
-        //     host_infra::run_sync_host_info_map(host_infra.clone(), host_info_map.clone());
+        //     host_provider::run_sync_host_info_map(host_provider.clone(), host_info_map.clone());
         // let health_checker_future =
         //     health_checker::run(host_info_map.clone(), health_check_map.clone());
         // let reaper_future = reaper::run(
-        //     host_infra.clone(),
+        //     host_provider.clone(),
         //     host_info_map.clone(),
         //     health_check_map.clone(),
         // );
@@ -55,7 +55,7 @@ fn main() -> Result<()> {
             // result = dns_sync_ips_future => { result }
         };
 
-        telemetry::on_shutdown(providers)?;
+        telemetry::on_shutdown(telemetry_providers)?;
 
         result
     })?;
