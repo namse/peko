@@ -45,7 +45,7 @@ export class OciComputeWorker extends pulumi.ComponentResource {
       "compartment",
       {
         description: "Compartment for fn0 OCI Compute Worker",
-        name: pulumi.interpolate`fn0-${compartmentSuffix}`,
+        name: pulumi.interpolate`fn0-host-${compartmentSuffix}`,
         enableDelete: true,
       },
       { parent: this }

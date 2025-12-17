@@ -5,7 +5,8 @@ import * as command from "@pulumi/command";
 import * as k8s from "@pulumi/kubernetes";
 import * as docker from "@pulumi/docker";
 import * as yaml from "js-yaml";
-import { OciWorkerInfraEnvs } from "./OciComputeWorker";
+import { OciWorkerInfraEnvs } from "../OciComputeWorker";
+import { hqGrafana } from "./grafana";
 
 export interface OciHeadQuarterArgs {
   region: pulumi.Input<string>;
@@ -13,7 +14,8 @@ export interface OciHeadQuarterArgs {
   vcnId: pulumi.Input<string>;
   ipv6cidrBlocks: pulumi.Input<string[]>;
   ociWorkerInfraEnvs: pulumi.Input<OciWorkerInfraEnvs>;
-  grafanaAlloyHelmValues: pulumi.Input<string>;
+  grafanaRegion: pulumi.Input<string>;
+  grafanaSlug: pulumi.Input<string>;
 }
 
 export class OciHeadQuarter extends pulumi.ComponentResource {
@@ -22,15 +24,11 @@ export class OciHeadQuarter extends pulumi.ComponentResource {
     args: OciHeadQuarterArgs,
     opts: pulumi.ComponentResourceOptions
   ) {
-    super("pkg:index:oci-head-quarter", name, args, opts);
+    const resourceInputs = { ...args };
+    delete (resourceInputs as any).ociWorkerInfraEnvs;
+    super("pkg:index:oci-head-quarter", name, resourceInputs, opts);
 
-    const {
-      region,
-      compartmentId,
-      vcnId,
-      ociWorkerInfraEnvs,
-      grafanaAlloyHelmValues,
-    } = args;
+    const { region, compartmentId, vcnId, ociWorkerInfraEnvs } = args;
 
     const nameSuffix8 = new random.RandomString(
       "name-suffix-8",
@@ -105,36 +103,36 @@ export class OciHeadQuarter extends pulumi.ComponentResource {
             protocol: "all",
             stateless: false,
           },
+          {
+            source: "10.0.0.0/16",
+            protocol: "all",
+            stateless: false,
+          },
         ],
       },
       { parent: this }
     );
 
-    const subnet = new oci.core.Subnet(
-      "subnet",
+    const regionalSubnet = new oci.core.Subnet(
+      "regional-subnet",
       {
+        displayName: "fn0-hq-regional-subnet",
         compartmentId,
-        availabilityDomain: pulumi
-          .all([compartmentId])
-          .apply(([compartmentId]) =>
-            oci.identity
-              .getAvailabilityDomain({
-                adNumber: 1,
-                compartmentId,
-              })
-              .then((x) => x.name)
-          ),
         vcnId,
-        ipv4cidrBlocks: ["10.0.0.0/24"],
-        ipv6cidrBlocks: pulumi
-          .all([args.ipv6cidrBlocks])
-          .apply(([ipv6cidrBlocks]) =>
-            ipv6cidrBlocks.map((x) => x.replace("/56", "/64"))
-          ),
+        ipv4cidrBlocks: ["10.0.2.0/24"],
         routeTableId: routeTable.id,
         securityListIds: [securityList.id],
       },
-      { parent: this }
+      { parent: this, deleteBeforeReplace: true }
+    );
+
+    const ad1 = pulumi.all([compartmentId]).apply(([compartmentId]) =>
+      oci.identity
+        .getAvailabilityDomain({
+          adNumber: 1,
+          compartmentId,
+        })
+        .then((x) => x.name)
     );
 
     const clusterOptions = pulumi
@@ -155,6 +153,15 @@ export class OciHeadQuarter extends pulumi.ComponentResource {
       {
         compartmentId,
         kubernetesVersion,
+        clusterPodNetworkOptions: [
+          {
+            cniType: "OCI_VCN_IP_NATIVE",
+          },
+        ],
+        endpointConfig: {
+          isPublicIpEnabled: true,
+          subnetId: regionalSubnet.id,
+        },
         vcnId,
         name: pulumi.interpolate`fn0-${nameSuffix8}`,
       },
@@ -175,7 +182,7 @@ export class OciHeadQuarter extends pulumi.ComponentResource {
       (options) =>
         options.sources
           .filter((x) => x.sourceName.includes("-aarch64-"))
-          .sort((a, b) => b.sourceName.localeCompare(a.sourceName))
+          .sort((a, b) => a.sourceName.localeCompare(b.sourceName))
           .pop()!.imageId
     );
 
@@ -195,10 +202,14 @@ export class OciHeadQuarter extends pulumi.ComponentResource {
           size: 1,
           placementConfigs: [
             {
-              availabilityDomain: subnet.availabilityDomain,
-              subnetId: subnet.id,
+              availabilityDomain: ad1,
+              subnetId: regionalSubnet.id,
             },
           ],
+          nodePoolPodNetworkOptionDetails: {
+            cniType: "OCI_VCN_IP_NATIVE",
+            podSubnetIds: [regionalSubnet.id],
+          },
         },
         nodeSourceDetails: {
           imageId,
@@ -255,69 +266,62 @@ export class OciHeadQuarter extends pulumi.ComponentResource {
       { parent: this, dependsOn: [nodePool] }
     );
 
-    const grafanaMonitoring = new k8s.helm.v3.Release(
-      "grafana-k8s-monitoring",
-      {
-        chart: "k8s-monitoring",
-        repositoryOpts: {
-          repo: "https://grafana.github.io/helm-charts",
-        },
-        namespace: "monitoring",
-        createNamespace: true,
-        values: pulumi
-          .all([grafanaAlloyHelmValues])
-          .apply(([grafanaAlloyHelmValues]) =>
-            yaml.load(grafanaAlloyHelmValues)
-          ),
-      },
-      { provider: k8sProvider, parent: this, dependsOn: [nodePool] }
-    );
+    hqGrafana(this, {
+      regionSlug: args.grafanaRegion,
+      slug: args.grafanaSlug,
+      k8sProvider: k8sProvider,
+      suffix: nameSuffix8,
+    });
 
-    const appLabels = { app: "hq" };
+    // const appLabels = { app: "hq" };
 
-    const deployment = new k8s.apps.v1.Deployment(
-      "hq-deployment",
-      {
-        metadata: { labels: appLabels },
-        spec: {
-          replicas: 1,
-          selector: { matchLabels: appLabels },
-          template: {
-            metadata: { labels: appLabels },
-            spec: {
-              containers: [
-                {
-                  name: appLabels.app,
-                  image: hqImage.imageName,
-                  ports: [{ containerPort: 8080 }],
-                  livenessProbe: {
-                    httpGet: {
-                      path: "/health",
-                      port: 8080,
-                    },
-                    initialDelaySeconds: 15,
-                    periodSeconds: 5,
-                    timeoutSeconds: 5,
-                    failureThreshold: 3,
-                  },
-                  env: pulumi
-                    .all([ociWorkerInfraEnvs])
-                    .apply(([ociWorkerInfraEnvs]) =>
-                      Object.entries(ociWorkerInfraEnvs).map(
-                        ([name, value]) => ({
-                          name,
-                          value,
-                        })
-                      )
-                    ),
-                },
-              ],
-            },
-          },
-        },
-      },
-      { provider: k8sProvider, parent: this }
-    );
+    // const deployment = new k8s.apps.v1.Deployment(
+    //   "hq-deployment",
+    //   {
+    //     metadata: { labels: appLabels },
+    //     spec: {
+    //       replicas: 1,
+    //       selector: { matchLabels: appLabels },
+    //       template: {
+    //         metadata: { labels: appLabels },
+    //         spec: {
+    //           containers: [
+    //             {
+    //               name: appLabels.app,
+    //               image: hqImage.imageName,
+    //               ports: [{ containerPort: 8080 }],
+    //               livenessProbe: {
+    //                 httpGet: {
+    //                   path: "/health",
+    //                   port: 8080,
+    //                 },
+    //                 initialDelaySeconds: 15,
+    //                 periodSeconds: 5,
+    //                 timeoutSeconds: 5,
+    //                 failureThreshold: 3,
+    //               },
+    //               env: pulumi
+    //                 .all([ociWorkerInfraEnvs])
+    //                 .apply(([ociWorkerInfraEnvs]) => [
+    //                   ...Object.entries(ociWorkerInfraEnvs).map(
+    //                     ([name, value]) => ({
+    //                       name,
+    //                       value,
+    //                     })
+    //                   ),
+    //                   {
+    //                     name: "OTLP_ENDPOINT",
+    //                     value: "http://alloy-service.monitoring:4317",
+    //                   },
+    //                 ]),
+    //             },
+    //           ],
+    //         },
+    //       },
+    //     },
+    //   },
+    //   { provider: k8sProvider, parent: this }
+    // );
 
     function deployDocker(parent: pulumi.Resource) {
       const repo = new oci.artifacts.ContainerRepository(

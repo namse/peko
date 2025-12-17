@@ -4,9 +4,9 @@ import * as pulumi from "@pulumi/pulumi";
 
 const config = new pulumi.Config();
 
-const accountId = config.require("CLOUDFLARE_ACCOUNT_ID");
-const zoneId = config.require("CLOUDFLARE_ZONE_ID");
-const domain = config.require("DOMAIN");
+const accountId = config.require("cloudflareAccountId");
+const zoneId = config.require("cloudflareZoneId");
+const domain = config.require("domain");
 
 const apiTokenPermissionGroups = Promise.all([
   cloudflare.getAccountApiTokenPermissionGroupsList({
@@ -30,21 +30,22 @@ const apiTokenPermissionGroups = Promise.all([
 // });
 
 const ociHeadQuarterVcn = new fn0.OciHeadQuarterVcn("ociHeadQuarterVcn", {
-  region: config.require("OCI_HEAD_QUARTER_REGION"),
+  region: config.require("ociHeadQuarterRegion"),
 });
 
 const ociComputeWorker = new fn0.OciComputeWorker("ociComputeWorker", {
-  region: config.require("OCI_COMPUTE_WORKER_REGION"),
+  region: config.require("ociComputeWorkerRegion"),
   hqIpv6CidrBlocks: ociHeadQuarterVcn.ipv6cidrBlocks,
 });
 
 const ociHeadQuarter = new fn0.OciHeadQuarter("ociHeadQuarter", {
-  region: config.require("OCI_HEAD_QUARTER_REGION"),
+  region: config.require("ociHeadQuarterRegion"),
   compartmentId: ociHeadQuarterVcn.compartmentId,
   vcnId: ociHeadQuarterVcn.vcnId,
   ipv6cidrBlocks: ociHeadQuarterVcn.ipv6cidrBlocks,
   ociWorkerInfraEnvs: ociComputeWorker.infraEnvs,
-  grafanaAlloyHelmValues: config.require("GRAFANA_ALLOY_HELM_VALUES"),
+  grafanaSlug: config.require("grafanaSlug"),
+  grafanaRegion: config.require("grafanaRegion"),
 });
 
 // const awsWatchdog = new fn0.AwsWatchdog("awsWatchdog", {
