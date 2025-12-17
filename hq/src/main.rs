@@ -16,15 +16,17 @@ use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper::{Request, Response};
 use hyper_util::rt::TokioIo;
+use metrics::*;
 use std::net::SocketAddr;
-use std::sync::Arc;
 use tokio::net::TcpListener;
+use tracing::*;
 
 fn main() -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
-    let provider = telemetry::setup_otlp()?;
 
     rt.block_on(async move {
+        let providers = telemetry::setup_otlp()?;
+
         // let host_infra = Arc::new(host_infra::oci::OciHostInfra::new());
         // let host_info_map = Arc::new(DashMap::new());
         // let health_check_map = Arc::new(DashMap::new());
@@ -54,7 +56,7 @@ fn main() -> Result<()> {
             // result = dns_sync_ips_future => { result }
         };
 
-        telemetry::on_shutdown(provider)?;
+        telemetry::on_shutdown(providers)?;
 
         result
     })?;
@@ -82,7 +84,10 @@ async fn web_server() -> Result<()> {
 
 async fn route(req: Request<hyper::body::Incoming>) -> Result<Response<Full<Bytes>>> {
     match req.uri().path() {
-        "/health" => Ok(Response::new(Full::new(Bytes::from("ok")))),
+        "/health" => {
+            info!("health check");
+            Ok(Response::new(Full::new(Bytes::from("ok"))))
+        }
         _ => Ok(Response::builder()
             .status(404)
             .body(Full::new(Bytes::from("not found")))
