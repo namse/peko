@@ -69,6 +69,9 @@ export function createOkeCluster(
         isPublicIpEnabled: true,
         subnetId: regionalSubnetId,
       },
+      options: {
+        ipFamilies: ["IPv4", "IPv6"],
+      },
       vcnId,
       name: pulumi.interpolate`fn0-${nameSuffix}`,
     },

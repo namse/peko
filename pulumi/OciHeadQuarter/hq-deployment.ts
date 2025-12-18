@@ -9,10 +9,12 @@ export function deployHqApplication(
     k8sProvider,
     hqImage,
     ociWorkerInfraEnvs,
+    otlpEndpoint,
   }: {
     k8sProvider: k8s.Provider;
     hqImage: docker.Image;
     ociWorkerInfraEnvs: pulumi.Input<OciWorkerInfraEnvs>;
+    otlpEndpoint: pulumi.Output<string>;
   }
 ): {
   deployment: k8s.apps.v1.Deployment;
@@ -27,12 +29,14 @@ export function deployHqApplication(
         replicas: 1,
         selector: { matchLabels: appLabels },
         template: {
-          metadata: { labels: appLabels },
+          metadata: {
+            labels: appLabels,
+          },
           spec: {
             containers: [
               {
                 name: appLabels.app,
-                image: hqImage.imageName,
+                image: hqImage.repoDigest,
                 ports: [{ containerPort: 8080 }],
                 livenessProbe: {
                   httpGet: {
@@ -45,8 +49,8 @@ export function deployHqApplication(
                   failureThreshold: 3,
                 },
                 env: pulumi
-                  .all([ociWorkerInfraEnvs])
-                  .apply(([ociWorkerInfraEnvs]) => [
+                  .all([ociWorkerInfraEnvs, otlpEndpoint])
+                  .apply(([ociWorkerInfraEnvs, otlpEndpoint]) => [
                     ...Object.entries(ociWorkerInfraEnvs).map(
                       ([name, value]) => ({
                         name,
@@ -55,7 +59,7 @@ export function deployHqApplication(
                     ),
                     {
                       name: "OTLP_ENDPOINT",
-                      value: "http://alloy-service.monitoring:4317",
+                      value: otlpEndpoint,
                     },
                   ]),
               },

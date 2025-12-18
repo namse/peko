@@ -66,7 +66,7 @@ export class OciHeadQuarter extends pulumi.ComponentResource {
     });
     this.kubeconfig = kubeconfig;
 
-    hqGrafana(this, {
+    const { release: grafanaRelease, otlpEndpoint } = hqGrafana(this, {
       regionSlug: args.grafanaRegion,
       slug: args.grafanaSlug,
       k8sProvider: k8sProvider,
@@ -75,18 +75,20 @@ export class OciHeadQuarter extends pulumi.ComponentResource {
 
     deployK8sDashboard(this, {
       k8sProvider,
+      dependsOn: [grafanaRelease],
     });
 
-    // const { hqImage } = createDockerRegistry(this, {
-    //   compartmentId,
-    //   nameSuffix: nameSuffix8,
-    //   region,
-    // });
+    const { hqImage } = createDockerRegistry(this, {
+      compartmentId,
+      nameSuffix: nameSuffix8,
+      region,
+    });
 
-    // deployHqApplication(this, {
-    //   k8sProvider,
-    //   hqImage,
-    //   ociWorkerInfraEnvs,
-    // });
+    deployHqApplication(this, {
+      k8sProvider,
+      hqImage,
+      ociWorkerInfraEnvs,
+      otlpEndpoint,
+    });
   }
 }

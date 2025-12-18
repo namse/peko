@@ -133,3 +133,12 @@ pub fn send_dns_sync_status(success: bool) {
         )],
     );
 }
+
+pub struct HqHeartbeat;
+
+impl HqHeartbeat {
+    pub fn send(self) {
+        let counter = global::meter("hq").u64_counter("hq_heartbeat").build();
+        counter.add(1, &[]);
+    }
+}

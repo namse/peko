@@ -7,13 +7,13 @@
 set -e
 
 NAMESPACE="kubernetes-dashboard"
+TARGET_SERVICE="kubernetes-dashboard-kong-proxy" 
 
 echo "=========================================="
 echo "Kubernetes Dashboard Access"
 echo "=========================================="
 echo ""
 
-# Get kubeconfig from Pulumi (never saved to disk)
 echo "Fetching kubeconfig from Pulumi..."
 KUBECONFIG_CONTENT=$(pulumi stack output kubeconfig --show-secrets 2>/dev/null)
 
@@ -26,18 +26,7 @@ fi
 echo "Kubeconfig fetched successfully (not saved to disk)"
 echo ""
 
-# Find the dashboard web service port
-echo "Detecting dashboard service port..."
-SERVICE_PORT=$(kubectl --kubeconfig=<(echo "$KUBECONFIG_CONTENT") get svc kubernetes-dashboard-web -n "$NAMESPACE" -o jsonpath='{.spec.ports[0].port}' 2>/dev/null)
-
-if [ -z "$SERVICE_PORT" ]; then
-    echo "Error: Could not find kubernetes-dashboard-web service."
-    echo "Make sure the dashboard is deployed."
-    exit 1
-fi
-
-echo "Dashboard service port: $SERVICE_PORT"
-echo ""
+SERVICE_PORT=443
 
 # Get the admin token using process substitution
 echo "Fetching admin token..."
@@ -71,7 +60,7 @@ if command -v pbcopy &> /dev/null; then
 fi
 
 echo "Port-forward command (if you need to run manually):"
-echo "kubectl port-forward -n $NAMESPACE svc/kubernetes-dashboard-web $LOCAL_PORT:$SERVICE_PORT"
+echo "kubectl port-forward -n $NAMESPACE svc/$TARGET_SERVICE $LOCAL_PORT:$SERVICE_PORT"
 echo ""
 echo "=========================================="
 echo ""
@@ -80,4 +69,36 @@ echo "Press Ctrl+C to stop"
 echo ""
 
 # Start kubectl port-forward using process substitution (no file saved to disk)
-kubectl --kubeconfig=<(echo "$KUBECONFIG_CONTENT") port-forward -n "$NAMESPACE" svc/kubernetes-dashboard-web "$LOCAL_PORT:$SERVICE_PORT"
+kubectl --kubeconfig=<(echo "$KUBECONFIG_CONTENT") port-forward -n "$NAMESPACE" svc/"$TARGET_SERVICE" "$LOCAL_PORT:$SERVICE_PORT" &
+PORT_FORWARD_PID=$!
+
+echo -n "Waiting for Dashboard to become ready..."
+MAX_RETRIES=30
+COUNT=0
+DASHBOARD_URL="https://localhost:$LOCAL_PORT"
+
+while ! curl -k -s -o /dev/null "$DASHBOARD_URL"; do
+    sleep 1
+    COUNT=$((COUNT+1))
+    echo -n "."
+    
+    if [ $COUNT -ge $MAX_RETRIES ]; then
+        echo ""
+        echo "Error: Timeout waiting for dashboard to start."
+        kill $PORT_FORWARD_PID
+        exit 1
+    fi
+done
+
+echo ""
+echo "✓ Dashboard is Ready!"
+echo ""
+
+if command -v open &> /dev/null; then
+    open "https://localhost:$LOCAL_PORT"
+    echo "✓ Browser opened automatically!"
+    echo "  (Note: Accept the self-signed certificate warning in your browser)"
+    echo ""
+fi
+
+wait $PORT_FORWARD_PID

@@ -5,8 +5,10 @@ export function deployK8sDashboard(
   parent: pulumi.Resource,
   {
     k8sProvider,
+    dependsOn,
   }: {
     k8sProvider: k8s.Provider;
+    dependsOn?: pulumi.Input<pulumi.Resource>[];
   }
 ) {
   const namespace = new k8s.core.v1.Namespace(
@@ -16,7 +18,7 @@ export function deployK8sDashboard(
         name: "kubernetes-dashboard",
       },
     },
-    { provider: k8sProvider, parent }
+    { provider: k8sProvider, parent, dependsOn }
   );
 
   // Deploy Kubernetes Dashboard via Helm
@@ -35,6 +37,16 @@ export function deployK8sDashboard(
           image: {
             repository: "docker.io/library/kong",
             tag: "3.9.0",
+          },
+          proxy: {
+            http: {
+              enabled: true,
+            },
+          },
+        },
+        app: {
+          ingress: {
+            enabled: false,
           },
         },
       },

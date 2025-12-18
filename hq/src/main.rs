@@ -17,15 +17,15 @@ use hyper::{Request, Response, body::Bytes, server::conn::http1, service::servic
 use hyper_util::rt::TokioIo;
 use params::HqParams;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use tokio::net::TcpListener;
 use tracing::*;
 
 fn main() -> Result<()> {
-    println!("start main");
     let rt = tokio::runtime::Runtime::new()?;
 
     rt.block_on(async move {
-        // let telemetry_providers = telemetry::setup_otlp()?;
+        let telemetry_providers = telemetry::setup_otlp()?;
         // let hq_params = HqParams::load()?;
 
         // let host_info_map = Arc::new(DashMap::new());
@@ -34,6 +34,18 @@ fn main() -> Result<()> {
         let shutdown_signal = async {
             tokio::signal::ctrl_c().await?;
             Ok(())
+        };
+
+        // let host_provider = HostProvider::from_params(&hq_params)?;
+
+        let heartbeat_future = async {
+            loop {
+                telemetry::HqHeartbeat.send();
+                info!("heartbeat sent");
+                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+            }
+            #[allow(unreachable_code)]
+            Ok::<(), color_eyre::eyre::Error>(())
         };
 
         // let sync_host_info_map_future =
@@ -50,13 +62,14 @@ fn main() -> Result<()> {
         let result = tokio::select! {
             result = shutdown_signal => { result }
             result = web_server() => { result }
+            result = heartbeat_future => { result }
             // result = sync_host_info_map_future => { result }
             // result = health_checker_future => { result }
             // result = reaper_future => { result }
             // result = dns_sync_ips_future => { result }
         };
 
-        // telemetry::on_shutdown(telemetry_providers)?;
+        telemetry::on_shutdown(telemetry_providers)?;
 
         result
     })?;

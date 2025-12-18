@@ -1,5 +1,6 @@
 import * as pulumi from "@pulumi/pulumi";
 import * as oci from "@pulumi/oci";
+import { Address6 } from "ip-address";
 import * as command from "@pulumi/command";
 
 export function createNetworking(
@@ -46,14 +47,16 @@ export function createNetworking(
     { parent }
   );
 
-  const myIp = new command.local.Command(
-    "my-ip",
-    {
-      create: "curl -s ifconfig.co",
-      triggers: [new Date().toISOString()],
-    },
-    { parent }
-  ).stdout;
+  const myIp = command.local.runOutput({
+    command: "curl -s ifconfig.co",
+  }).stdout;
+
+  const ipv6cidrBlock = pulumi.output(ipv6cidrBlocks).apply((blocks) => {
+    const cidr = blocks[0];
+    const address = new Address6(cidr);
+    const startAddress = address.startAddress();
+    return `${startAddress.correctForm()}/64`;
+  });
 
   const securityList = new oci.core.SecurityList(
     "security-list",
@@ -85,6 +88,11 @@ export function createNetworking(
           protocol: "all",
           stateless: false,
         },
+        {
+          source: ipv6cidrBlock,
+          protocol: "all",
+          stateless: false,
+        },
       ],
     },
     { parent }
@@ -97,12 +105,7 @@ export function createNetworking(
       compartmentId,
       vcnId,
       ipv4cidrBlocks: ["10.0.2.0/24"],
-      ipv6cidrBlocks: pulumi.output(ipv6cidrBlocks).apply((blocks) =>
-        blocks.map((block) => {
-          const prefix = block.split("/")[0];
-          return `${prefix}2:0/64`;
-        })
-      ),
+      ipv6cidrBlock,
       prohibitPublicIpOnVnic: false,
       routeTableId: routeTable.id,
       securityListIds: [securityList.id],
