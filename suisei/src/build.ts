@@ -1,8 +1,10 @@
 import { fileURLToPath } from "node:url";
 import { resolve, dirname } from "node:path";
 import { spawn, type SpawnOptions } from "node:child_process";
-import { promises as fs } from "node:fs";
-import { generateRolldownConfig } from "./rolldown/config.js";
+import fs from "node:fs/promises";
+import { createRequire } from "node:module";
+
+const require = createRequire(import.meta.url);
 
 export interface BuildConfig {
   server: URL;
@@ -13,18 +15,111 @@ export async function buildServer(buildConfig: BuildConfig) {
   console.log("🚀 Building WASM component with suisei...");
 
   const serverDir = fileURLToPath(buildConfig.server);
-  const clientDir = fileURLToPath(buildConfig.client);
 
-  await createServerEntry(serverDir);
+  // 1. Stub 파일 생성 (사용금지 모듈 무력화용)
+  const stubPath = resolve(serverDir, "stub.js");
+  await fs.writeFile(stubPath, "export default {};");
 
+  // 2. Buffer 패키지 경로 찾기
+  let bufferPath: string;
+  try {
+    bufferPath = require.resolve("buffer/");
+  } catch (e) {
+    console.error("❌ Failed to resolve 'buffer' package.");
+    throw e;
+  }
+
+  // 3. Shim Entry 파일 생성 (Buffer 및 Entry 연결용)
+  // Intl은 여기서 제거하고 banner로 옮김 (실행 순서 문제 해결)
+  const shimEntryPath = resolve(serverDir, "shim.mjs");
+  const shimContent = `
+import { Buffer } from 'buffer'; 
+
+// Buffer Polyfill
+globalThis.Buffer = Buffer;
+
+// Re-export Astro Entry
+export * from './entry.mjs';
+`;
+  await fs.writeFile(shimEntryPath, shimContent);
+
+  // 4. Intl Polyfill 코드 (Banner용 - Import 없이 순수 JS로 작성)
+  // 이 코드는 번들 파일의 최상단에 물리적으로 박히므로 가장 먼저 실행됨.
+  const intlBannerCode = `
+// [Shim] Intl for WASM (Injected via Banner)
+if (typeof Intl === 'undefined') {
+  globalThis.Intl = {
+    DateTimeFormat: class {
+      constructor(locales, options) {}
+      format(date) { return new Date(date || Date.now()).toISOString(); }
+      static supportedLocalesOf(locales, options) { return []; }
+      formatToParts(date) { return []; }
+      resolvedOptions() { return {}; }
+    },
+    NumberFormat: class {
+      constructor(locales, options) {}
+      format(number) { return String(number); }
+      resolvedOptions() { return { locale: "en-US" }; }
+    },
+    Segmenter: class {
+      segment(input) { return [input]; }
+    },
+    PluralRules: class {
+      select() { return 'other'; }
+    },
+    getCanonicalLocales: (l) => l ? (Array.isArray(l) ? l : [l]) : []
+  };
+}
+`;
+
+  // 5. Rolldown 설정 파일 생성
   const rolldownConfigPath = resolve(serverDir, "rolldown.config.mjs");
   const componentOutput = resolve(serverDir, "component.js");
 
-  const rolldownConfig = generateRolldownConfig(
-    "./component.ts",
-    "./component.js"
+  const safeStubPath = JSON.stringify(stubPath);
+  const safeBufferPath = JSON.stringify(bufferPath);
+
+  await fs.writeFile(
+    rolldownConfigPath,
+    `export default {
+  input: 'shim.mjs',
+  external: /wasi:.*/,
+  resolve: {
+    alias: {
+      "es-module-lexer": "es-module-lexer/js",
+      "buffer": ${safeBufferPath},
+      "node:buffer": ${safeBufferPath},
+      
+      // Node Built-ins Stubbing
+      "sharp": ${safeStubPath},
+      "node:util": ${safeStubPath},
+      "node:stream": ${safeStubPath},
+      "node:path": ${safeStubPath},
+      "node:child_process": ${safeStubPath},
+      "node:crypto": ${safeStubPath},
+      "node:events": ${safeStubPath},
+      "node:os": ${safeStubPath},
+      "node:fs": ${safeStubPath},
+      "fs": ${safeStubPath},
+      "path": ${safeStubPath},
+      "events": ${safeStubPath},
+      "util": ${safeStubPath},
+      "stream": ${safeStubPath},
+      "child_process": ${safeStubPath},
+      "crypto": ${safeStubPath},
+      "os": ${safeStubPath},
+    },
+  },
+  output: {
+    file: 'component.js',
+    format: 'esm',
+    inlineDynamicImports: true,
+    // ✅ 여기에 Intl 코드를 넣습니다. Import 구문이 없으므로 경로 에러가 안 납니다.
+    banner: ${JSON.stringify(intlBannerCode)}
+  },
+};
+`
   );
-  await fs.writeFile(rolldownConfigPath, rolldownConfig);
 
   const suiseiRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
   const witDir = resolve(suiseiRoot, "wit");
@@ -50,82 +145,6 @@ export async function buildServer(buildConfig: BuildConfig) {
 
   console.log("✅ WASM component built successfully!");
   console.log(`   Output: ${wasmOutput}`);
-}
-
-async function createServerEntry(serverDir: string) {
-  const files = await fs.readdir(serverDir);
-  const manifestFile = files.find(
-    (file) => file.startsWith("manifest_") && file.endsWith(".mjs")
-  );
-
-  if (!manifestFile) {
-    throw new Error("Could not find manifest file in server directory");
-  }
-
-  const shimContent = `const IntlMock = {
-  DateTimeFormat: class {
-    constructor(locales, options) {}
-    format(date) {
-      return new Date(date || Date.now()).toISOString();
-    }
-    resolvedOptions() {
-      return { locale: 'en-US' };
-    }
-  },
-  NumberFormat: class {
-    constructor(locales, options) {}
-    format(number) {
-      return String(number);
-    }
-    resolvedOptions() {
-      return { locale: 'en-US' };
-    }
-  },
-  Segmenter: class {
-    segment(input) {
-      return input.split('');
-    }
-  },
-};
-
-const WebAssemblyMock = {
-  compile: () => Promise.reject(new Error('WebAssembly.compile is not supported')),
-  instantiate: () => Promise.reject(new Error('WebAssembly.instantiate is not supported')),
-  validate: () => false,
-  Module: class {},
-  Instance: class {},
-  Memory: class {},
-  Table: class {},
-  CompileError: Error,
-  LinkError: Error,
-  RuntimeError: Error,
-};
-
-if (typeof globalThis.Intl === 'undefined') {
-  globalThis.Intl = IntlMock;
-}
-
-if (typeof globalThis.WebAssembly === 'undefined') {
-  globalThis.WebAssembly = WebAssemblyMock;
-}
-`;
-
-  const entryContent = `import './shim-intl.js';
-import { App } from 'astro/app';
-import { manifest } from './${manifestFile}';
-import { createHonoApp } from 'suisei/server/hono-app';
-import { fire } from '@bytecodealliance/jco-std/wasi/0.2.6/http/adapters/hono/server';
-
-const app = createHonoApp(new App(manifest));
-fire(app);
-
-export { incomingHandler } from '@bytecodealliance/jco-std/wasi/0.2.6/http/adapters/hono/server';
-`;
-
-  await Promise.all([
-    fs.writeFile(resolve(serverDir, "shim-intl.js"), shimContent),
-    fs.writeFile(resolve(serverDir, "component.ts"), entryContent),
-  ]);
 }
 
 function runCommand(

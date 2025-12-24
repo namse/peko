@@ -1965,8 +1965,8 @@ name = "fn0"
 version = "0.1.0"
 dependencies = [
  "adapt-cache",
+ "anyhow",
  "bytes",
- "color-eyre",
  "futures",
  "http-body-util",
  "hyper 1.8.1",

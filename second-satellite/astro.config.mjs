@@ -1,8 +1,8 @@
 // @ts-check
-import { defineConfig } from 'astro/config';
-import suisei from 'suisei';
+import { defineConfig } from "astro/config";
+import suisei from "suisei";
 
 export default defineConfig({
-  output: 'server',
+  output: "server",
   adapter: suisei(),
 });

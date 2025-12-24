@@ -1,5 +1,4 @@
 import type { AstroIntegration } from "astro";
-import { getAdapter } from "./adapter.js";
 import { createVitePlugins } from "./vite/plugins.js";
 import { BuildConfig, buildServer } from "./build.js";
 
@@ -20,6 +19,11 @@ export default function suisei(_options: SuiseiOptions = {}): AstroIntegration {
             ssr: {
               noExternal: ["hono", "@bytecodealliance/jco-std"],
             },
+            build: {
+              rollupOptions: {
+                external: [/^wasi:.*/],
+              },
+            },
           },
         });
       },
@@ -30,7 +34,18 @@ export default function suisei(_options: SuiseiOptions = {}): AstroIntegration {
           server: config.build.server,
         };
 
-        setAdapter(getAdapter());
+        setAdapter({
+          name: "suisei",
+          serverEntrypoint: "suisei/server-entry",
+          previewEntrypoint: "suisei/preview",
+          exports: ["incomingHandler"],
+          supportedAstroFeatures: {
+            hybridOutput: "stable",
+            staticOutput: "stable",
+            serverOutput: "stable",
+            sharpImageService: "unsupported",
+          },
+        });
 
         if (config.output === "static") {
           throw new Error(

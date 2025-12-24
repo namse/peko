@@ -12,7 +12,7 @@ pub type TelemetryProviders = (SdkTracerProvider, SdkMeterProvider);
 
 pub fn setup_telemetry(
     otlp_endpoint: Option<String>,
-) -> color_eyre::Result<Option<TelemetryProviders>> {
+) -> anyhow::Result<Option<TelemetryProviders>> {
     let Some(endpoint) = otlp_endpoint else {
         tracing_subscriber::fmt::init();
         info!("telemetry setup completed (stdout-only mode)");
@@ -59,7 +59,7 @@ pub fn setup_telemetry(
     Ok(Some((tracer_provider, meter_provider)))
 }
 
-pub fn shutdown_telemetry(providers: Option<TelemetryProviders>) -> color_eyre::Result<()> {
+pub fn shutdown_telemetry(providers: Option<TelemetryProviders>) -> anyhow::Result<()> {
     if let Some((tracer_provider, meter_provider)) = providers {
         tracer_provider.shutdown()?;
         meter_provider.shutdown()?;

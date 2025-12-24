@@ -16,10 +16,16 @@
     "dev": "tsc --watch"
   },
   "dependencies": {
-    "hono": "^4.7.11",
+    "@bytecodealliance/componentize-js": "^0.19.3",
     "@bytecodealliance/jco": "^1.7.3",
     "@bytecodealliance/jco-std": "^0.1.0",
-    "@bytecodealliance/componentize-js": "^0.19.3",
+    "@formatjs/intl-datetimeformat": "^7.0.6",
+    "@formatjs/intl-getcanonicallocales": "^3.0.4",
+    "@formatjs/intl-locale": "^5.0.6",
+    "@formatjs/intl-numberformat": "^9.0.7",
+    "@formatjs/intl-segmenter": "^12.0.5",
+    "buffer": "^6.0.3",
+    "hono": "^4.7.11",
     "rolldown": "^1.0.0-beta.55"
   },
   "peerDependencies": {
@@ -27,7 +33,7 @@
   },
   "devDependencies": {
     "@types/node": "^24.10.4",
-    "typescript": "^5.7.3",
-    "astro": "^5.16.6"
+    "astro": "^5.16.6",
+    "typescript": "^5.7.3"
   }
 }

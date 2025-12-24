@@ -1,4 +1,7 @@
+pub mod compile;
+mod engine;
 mod execute;
+pub mod one;
 pub mod telemetry;
 
 pub use bytes::Bytes;
@@ -23,12 +26,12 @@ pub struct Fn0 {
 }
 
 impl Fn0 {
-    pub async fn new(config: Config) -> color_eyre::Result<Self> {
+    pub async fn new(config: Config) -> anyhow::Result<Self> {
         let proxy_cache = match config.wasm_path {
             Some(wasm_path) => adapt_cache::fs::FsAdaptCache::new(
                 wasm_path
                     .parent()
-                    .ok_or_else(|| color_eyre::eyre::eyre!("cannot find wasm_path's parent"))?
+                    .ok_or_else(|| anyhow::anyhow!("cannot find wasm_path's parent"))?
                     .to_path_buf(),
                 1024 * 1024,
             ),
@@ -57,7 +60,7 @@ impl Fn0 {
         &self,
         code_id: String,
         req: Request<hyper::body::Incoming>,
-    ) -> color_eyre::Result<execute::Response> {
+    ) -> anyhow::Result<execute::Response> {
         let (res_tx, res_rx) = tokio::sync::oneshot::channel();
         if self
             .job_tx

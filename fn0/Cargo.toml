@@ -11,7 +11,7 @@ wasmtime = { version = "39", default-features = false, features = [
     "component-model",
     "component-model-async",
     "memory-protection-keys",
-    "winch",
+    "cranelift",
     "parallel-compilation",
     "cache",
 ] }
@@ -24,7 +24,6 @@ hyper-util = { version = "0.1", features = ["service"] }
 tower = { version = "0.5.2", features = ["timeout", "util"] }
 tower-http = { version = "0.6.7", features = ["timeout"] }
 bytes = "1"
-color-eyre = "0.6.5"
 http-body-util = "0.1"
 sysinfo = "0.37.2"
 oci-rust-sdk = { path = "../oci-rust-sdk", features = ["virtual_network"] }
@@ -46,6 +45,7 @@ opentelemetry-otlp = { version = "0.31.0", features = [
 tracing-opentelemetry = "0.32.0"
 tracing-subscriber = "0.3.22"
 tracing = "0.1.43"
+anyhow = "1.0.100"
 
 [dev-dependencies]
 wasmtime = { version = "39", features = [
