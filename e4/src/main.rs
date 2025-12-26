@@ -1,5 +1,17 @@
-use anyhow::Result;
+use deno_core::anyhow::Result;
 use deno_core::{JsRuntime, RuntimeOptions, extension, op2, resolve_url, v8::CreateParams};
+
+fn main() -> Result<()> {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?
+        .block_on(async move {
+            let code = include_str!("../example-hello-world/dist/bundle.js");
+            run(code).await?;
+            Ok::<(), deno_core::anyhow::Error>(())
+        })?;
+    Ok(())
+}
 
 extension!(
     bootstrap,
@@ -12,22 +24,26 @@ pub fn op_custom_print(#[string] msg: &str) {
     println!("[MyRust-Log] {msg}");
 }
 
-deno_core::extension!(my_runtime_extensions, ops = [op_custom_print],);
+fn create_runtime() -> JsRuntime {
+    let create_params = CreateParams::default();
 
-fn main() -> Result<()> {
-    tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()?
-        .block_on(async move {
-            let code = include_str!("../example-hello-world/dist/bundle.js");
-            run(code).await?;
-            anyhow::Ok(())
-        })?;
-    Ok(())
+    let runtime_options = RuntimeOptions {
+        extensions: vec![
+            deno_webidl::deno_webidl::init(),
+            deno_web::deno_web::init(Default::default()),
+            deno_fetch::deno_fetch::init(Default::default()),
+            bootstrap::init(),
+        ],
+        create_params: Some(create_params),
+        ..Default::default()
+    };
+
+    JsRuntime::new(runtime_options)
 }
 
 async fn run(script: &str) -> Result<()> {
     let mut runtime = create_runtime();
+
     let mod_id = runtime
         .load_main_es_module_from_code(&resolve_url("fn0://main.js").unwrap(), script.to_string())
         .await?;
@@ -59,7 +75,11 @@ async fn run(script: &str) -> Result<()> {
         deno_core::v8::Global::new(scope, result_promise_val)
     };
 
-    let result_global = runtime.resolve(result_promise_global).await?;
+    let result_global = {
+        let result = runtime.resolve(result_promise_global);
+        runtime.run_event_loop(Default::default()).await?;
+        result.await?
+    };
 
     deno_core::scope!(scope, runtime);
 
@@ -72,18 +92,4 @@ async fn run(script: &str) -> Result<()> {
     }
 
     Ok(())
-}
-
-fn create_runtime() -> JsRuntime {
-    let extensions = vec![];
-
-    let create_params = CreateParams::default();
-
-    let runtime_options = RuntimeOptions {
-        extensions,
-        create_params: Some(create_params),
-        ..Default::default()
-    };
-
-    JsRuntime::new(runtime_options)
 }
