@@ -153,11 +153,11 @@ fn generate_route_block(route: &RouteInfo) -> String {
 
     block.push_str("        return Ok(Response::new(\n");
     block.push_str(&format!(
-        "            serde_json::to_string(&{}::handler({})",
+        "            Body::from_stream(forte_json::to_stream(&{}::handler({})",
         route.mod_name,
         args.join(", ")
     ));
-    block.push_str(".await?)?.into(),\n");
+    block.push_str(".await?)),\n");
     block.push_str("        ));\n");
     block.push_str("    }\n");
 
