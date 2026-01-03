@@ -32,9 +32,10 @@ async fn main() -> Result<()> {
         },
 
         Commands::Build { project } => {
-            let project_dir = project.unwrap_or_else(|| ".".into());
-            println!("TODO: Build project at '{}'", project_dir.display());
-            // TODO: Implement build
+            let options = cli::build::BuildOptions {
+                project_dir: project.unwrap_or_else(|| ".".into()),
+            };
+            cli::build::run(options)?;
         }
     }
 
