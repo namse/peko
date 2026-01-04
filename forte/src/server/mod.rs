@@ -1,9 +1,12 @@
 mod cache;
+mod hmr;
 
 pub use cache::SimpleCache;
+pub use hmr::HmrBroadcaster;
 
 use anyhow::Result;
 use fn0::{CodeKind, DeploymentMap, Fn0};
+use futures_util::{SinkExt, StreamExt};
 use http_body_util::{BodyExt, Full, combinators::UnsyncBoxBody};
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
@@ -13,6 +16,8 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::net::TcpListener;
+use tokio_tungstenite::tungstenite::handshake::derive_accept_key;
+use tokio_tungstenite::tungstenite::Message;
 
 pub struct ServerConfig {
     pub port: u16,
@@ -23,6 +28,7 @@ pub struct ServerConfig {
 
 pub struct ServerHandle {
     pub cache: SimpleCache,
+    pub hmr: HmrBroadcaster,
 }
 
 pub async fn run(config: ServerConfig) -> Result<ServerHandle> {
@@ -31,8 +37,10 @@ pub async fn run(config: ServerConfig) -> Result<ServerHandle> {
     deployment_map.register_code("frontend", CodeKind::Js);
 
     let cache = SimpleCache::new(config.backend_path.clone(), config.frontend_path.clone());
+    let hmr = HmrBroadcaster::new();
     let handle = ServerHandle {
         cache: cache.clone(),
+        hmr: hmr.clone(),
     };
 
     let fn0 = Arc::new(Fn0::new(cache.clone(), cache, deployment_map));
@@ -53,20 +61,20 @@ pub async fn run(config: ServerConfig) -> Result<ServerHandle> {
             };
             let fn0_clone = fn0.clone();
             let public_dir_clone = public_dir.clone();
+            let hmr_clone = hmr.clone();
 
             tokio::spawn(async move {
                 let io = TokioIo::new(socket);
-                if let Err(err) = http1::Builder::new()
-                    .serve_connection(
-                        io,
-                        service_fn(move |req| {
-                            let fn0 = fn0_clone.clone();
-                            let public_dir = public_dir_clone.clone();
-                            handle_request(req, fn0, public_dir)
-                        }),
-                    )
-                    .await
-                {
+                let conn = http1::Builder::new().serve_connection(
+                    io,
+                    service_fn(move |req| {
+                        let fn0 = fn0_clone.clone();
+                        let public_dir = public_dir_clone.clone();
+                        let hmr = hmr_clone.clone();
+                        handle_request(req, fn0, public_dir, hmr)
+                    }),
+                );
+                if let Err(err) = conn.with_upgrades().await {
                     eprintln!("Failed to serve connection: {}", err);
                 }
             });
@@ -80,10 +88,15 @@ async fn handle_request(
     req: Request<hyper::body::Incoming>,
     fn0: Arc<Fn0<SimpleCache>>,
     public_dir: Arc<PathBuf>,
+    hmr: HmrBroadcaster,
 ) -> Result<fn0::Response> {
     let uri = req.uri().clone();
     let path = uri.path();
     println!("Received {} {path}", req.method());
+
+    if path == "/__hmr" {
+        return handle_hmr_upgrade(req, hmr).await;
+    }
 
     if let Some(static_response) = try_serve_static(&public_dir, path).await {
         return Ok(static_response);
@@ -199,7 +212,7 @@ async fn try_serve_static(public_dir: &PathBuf, path: &str) -> Option<fn0::Respo
     }
 }
 
-fn get_content_type(path: &PathBuf) -> &'static str {
+fn get_content_type(path: &std::path::Path) -> &'static str {
     match path.extension().and_then(|e| e.to_str()) {
         Some("html") => "text/html; charset=utf-8",
         Some("css") => "text/css; charset=utf-8",
@@ -226,3 +239,81 @@ fn get_content_type(path: &PathBuf) -> &'static str {
         _ => "application/octet-stream",
     }
 }
+
+async fn handle_hmr_upgrade(
+    req: Request<hyper::body::Incoming>,
+    hmr: HmrBroadcaster,
+) -> Result<fn0::Response> {
+    let ws_key = req
+        .headers()
+        .get("sec-websocket-key")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
+
+    let Some(ws_key) = ws_key else {
+        return Ok(Response::builder()
+            .status(StatusCode::BAD_REQUEST)
+            .body(
+                Full::new(bytes::Bytes::from("Missing WebSocket key"))
+                    .map_err(|e| anyhow::anyhow!("{e}"))
+                    .boxed_unsync(),
+            )?);
+    };
+
+    let accept_key = derive_accept_key(ws_key.as_bytes());
+
+    tokio::spawn(async move {
+        match hyper::upgrade::on(req).await {
+            Ok(upgraded) => {
+                let ws_stream = tokio_tungstenite::WebSocketStream::from_raw_socket(
+                    TokioIo::new(upgraded),
+                    tokio_tungstenite::tungstenite::protocol::Role::Server,
+                    None,
+                )
+                .await;
+
+                let (mut ws_tx, mut ws_rx) = ws_stream.split();
+                let mut hmr_rx = hmr.subscribe();
+
+                loop {
+                    tokio::select! {
+                        msg = hmr_rx.recv() => {
+                            match msg {
+                                Ok(data) => {
+                                    if ws_tx.send(Message::Text(data)).await.is_err() {
+                                        break;
+                                    }
+                                }
+                                Err(_) => break,
+                            }
+                        }
+                        ws_msg = ws_rx.next() => {
+                            match ws_msg {
+                                Some(Ok(Message::Close(_))) | None => break,
+                                Some(Ok(Message::Ping(data))) => {
+                                    let _ = ws_tx.send(Message::Pong(data)).await;
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("WebSocket upgrade error: {}", e);
+            }
+        }
+    });
+
+    Ok(Response::builder()
+        .status(StatusCode::SWITCHING_PROTOCOLS)
+        .header("upgrade", "websocket")
+        .header("connection", "Upgrade")
+        .header("sec-websocket-accept", accept_key)
+        .body(
+            Full::new(bytes::Bytes::new())
+                .map_err(|e| anyhow::anyhow!("{e}"))
+                .boxed_unsync(),
+        )?)
+}
+

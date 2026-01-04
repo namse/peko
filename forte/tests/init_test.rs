@@ -25,6 +25,7 @@ fn test_init_creates_project_structure() {
     assert!(project_dir.join("fe/tsconfig.json").exists());
     assert!(project_dir.join("fe/rolldown.config.ts").exists());
     assert!(project_dir.join("fe/src/server.tsx").exists());
+    assert!(project_dir.join("fe/src/client.tsx").exists());
     assert!(project_dir.join("fe/src/pages/index/page.tsx").exists());
     assert!(project_dir.join("fe/public/robots.txt").exists());
 }

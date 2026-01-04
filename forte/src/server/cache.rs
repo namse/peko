@@ -26,6 +26,7 @@ impl SimpleCache {
         cache.remove(id);
     }
 
+    #[allow(dead_code)]
     pub async fn invalidate_all(&self) {
         let mut cache = self.memory.lock().await;
         cache.clear();

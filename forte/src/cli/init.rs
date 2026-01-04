@@ -65,6 +65,11 @@ pub fn run(name: &str) -> Result<()> {
     )?;
 
     fs::write(
+        project_dir.join("fe/src/client.tsx"),
+        generate_client_tsx(),
+    )?;
+
+    fs::write(
         project_dir.join("fe/src/pages/index/page.tsx"),
         generate_index_page_tsx(),
     )?;
@@ -260,13 +265,22 @@ fn generate_tsconfig() -> &'static str {
 fn generate_rolldown_config() -> &'static str {
     r#"import { defineConfig } from "rolldown";
 
-export default defineConfig({
-  input: "src/server.tsx",
-  output: {
-    file: "dist/server.js",
-    inlineDynamicImports: true,
+export default defineConfig([
+  {
+    input: "src/server.tsx",
+    output: {
+      file: "dist/server.js",
+      inlineDynamicImports: true,
+    },
   },
-});
+  {
+    input: "src/client.tsx",
+    output: {
+      file: "dist/client.js",
+      inlineDynamicImports: true,
+    },
+  },
+]);
 "#
 }
 
@@ -300,14 +314,20 @@ function matchRoute(pathname: string): { route: typeof routes[0]; params: Record
     return null;
 }
 
+function escapeJsonForScript(json: string): string {
+    return json.replace(/</g, "\\u003c").replace(/>/g, "\\u003e");
+}
+
 (globalThis as any).handler = async function handler(request: Request): Promise<Response> {
     const props = await request.json();
     const url = new URL(request.url);
 
     const matched = matchRoute(url.pathname);
     if (matched) {
+        const allProps = { ...props, params: matched.params };
         const pageModule = await matched.route.component();
-        const html = renderToString(pageModule.default({ ...props, params: matched.params }));
+        const html = renderToString(pageModule.default(allProps));
+        const propsJson = escapeJsonForScript(JSON.stringify(allProps));
 
         return new Response(
             `<!DOCTYPE html>
@@ -318,6 +338,8 @@ function matchRoute(pathname: string): { route: typeof routes[0]; params: Record
 </head>
 <body>
     <div id="root">${html}</div>
+    <script>window.__FORTE_PROPS__ = ${propsJson};</script>
+    <script type="module" src="/public/client.js"></script>
 </body>
 </html>`,
             {
@@ -352,5 +374,85 @@ export default function IndexPage(props: Props) {
 fn generate_robots_txt() -> &'static str {
     r#"User-agent: *
 Allow: /
+"#
+}
+
+fn generate_client_tsx() -> &'static str {
+    r#"import { hydrateRoot } from "react-dom/client";
+import { routes } from "./routes.generated";
+
+function matchRoute(pathname: string): { route: typeof routes[0]; params: Record<string, string> } | null {
+    for (const route of routes) {
+        const routeParts = route.path.split("/");
+        const pathParts = pathname.split("/");
+
+        if (routeParts.length !== pathParts.length) continue;
+
+        const params: Record<string, string> = {};
+        let match = true;
+
+        for (let i = 0; i < routeParts.length; i++) {
+            if (routeParts[i].startsWith(":")) {
+                params[routeParts[i].slice(1)] = pathParts[i];
+            } else if (routeParts[i] !== pathParts[i]) {
+                match = false;
+                break;
+            }
+        }
+
+        if (match) {
+            return { route, params };
+        }
+    }
+    return null;
+}
+
+function setupHmr() {
+    let reconnectAttempts = 0;
+    const maxReconnectDelay = 5000;
+
+    function connect() {
+        const ws = new WebSocket(`ws://${location.host}/__hmr`);
+
+        ws.onopen = () => {
+            console.log("[HMR] Connected");
+            reconnectAttempts = 0;
+        };
+
+        ws.onmessage = (event) => {
+            if (event.data === "reload") {
+                console.log("[HMR] Reloading...");
+                location.reload();
+            }
+        };
+
+        ws.onclose = () => {
+            const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), maxReconnectDelay);
+            reconnectAttempts++;
+            console.log(`[HMR] Disconnected, reconnecting in ${delay}ms...`);
+            setTimeout(connect, delay);
+        };
+
+        ws.onerror = () => {
+            ws.close();
+        };
+    }
+
+    connect();
+}
+
+async function hydrate() {
+    const props = (window as any).__FORTE_PROPS__;
+    const matched = matchRoute(window.location.pathname);
+
+    if (matched) {
+        const pageModule = await matched.route.component();
+        const element = pageModule.default({ ...props, params: matched.params });
+        hydrateRoot(document.getElementById("root")!, element);
+    }
+}
+
+hydrate();
+setupHmr();
 "#
 }

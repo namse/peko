@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use std::fs;
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -109,12 +110,11 @@ fn scan_pages_dir(base_dir: &Path, current_dir: &Path, routes: &mut Vec<(String,
 
         if path.is_dir() {
             scan_pages_dir(base_dir, &path, routes)?;
-        } else if path.extension().is_some_and(|ext| ext == "rs") {
-            if has_handler_function(&path)? {
-                if let Some((route_path, fe_page_path)) = path_to_route(base_dir, &path) {
-                    routes.push((route_path, fe_page_path));
-                }
-            }
+        } else if path.extension().is_some_and(|ext| ext == "rs")
+            && has_handler_function(&path)?
+            && let Some((route_path, fe_page_path)) = path_to_route(base_dir, &path)
+        {
+            routes.push((route_path, fe_page_path));
         }
     }
     Ok(())
@@ -212,21 +212,47 @@ fn create_dist(project_dir: &Path, dist_dir: &Path) -> Result<()> {
 
     let backend_wasm = project_dir.join("rs/target/wasm32-wasip2/release/backend.wasm");
     let frontend_js = project_dir.join("fe/dist/server.js");
+    let client_js = project_dir.join("fe/dist/client.js");
     let public_dir = project_dir.join("fe/public");
 
     fs::copy(&backend_wasm, dist_dir.join("backend.wasm"))?;
     println!("[dist] Copied backend.wasm");
 
-    fs::copy(&frontend_js, dist_dir.join("server.js"))?;
-    println!("[dist] Copied server.js");
+    let dist_public = dist_dir.join("public");
+    fs::create_dir_all(&dist_public)?;
 
     if public_dir.exists() {
-        let dist_public = dist_dir.join("public");
         copy_dir_recursive(&public_dir, &dist_public)?;
         println!("[dist] Copied public/");
     }
 
+    let client_content = fs::read(&client_js)?;
+    let hash = compute_hash(&client_content);
+    let hashed_filename = format!("client.{}.js", hash);
+
+    fs::write(dist_public.join(&hashed_filename), &client_content)?;
+    println!("[dist] Copied {} (hashed)", hashed_filename);
+
+    let server_content = fs::read_to_string(&frontend_js)?;
+    let updated_content = server_content.replace(
+        "/public/client.js",
+        &format!("/public/{}", hashed_filename),
+    );
+    fs::write(dist_dir.join("server.js"), updated_content)?;
+    println!("[dist] Copied server.js (updated client path)");
+
+    let manifest = format!(r#"{{"client.js":"{}"}}"#, hashed_filename);
+    fs::write(dist_public.join("manifest.json"), manifest)?;
+    println!("[dist] Generated manifest.json");
+
     Ok(())
+}
+
+fn compute_hash(content: &[u8]) -> String {
+    let mut hasher = DefaultHasher::new();
+    content.hash(&mut hasher);
+    let hash = hasher.finish();
+    format!("{:08x}", hash as u32)
 }
 
 fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {

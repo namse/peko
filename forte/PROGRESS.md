@@ -89,9 +89,69 @@ forte/src/
   - `public/` (정적 파일 복사)
 - E2E 테스트 통과 (2개)
 
-## 다음 단계
+### 10. Hydration 지원 ✅
 
-모든 계획된 작업 완료! 🎉
+클라이언트 사이드 React 마운팅 구현 완료.
+
+- `fe/src/client.tsx` 템플릿 추가 (`hydrateRoot` 사용)
+- `rolldown.config.ts` 배열로 변경 (server.js + client.js 이중 빌드)
+- `server.tsx`에서 `window.__FORTE_PROPS__` 직렬화 + `<script>` 태그 추가
+- XSS 방지를 위한 `escapeJsonForScript()` 함수 추가
+- `forte dev`: 빌드 후 `fe/dist/client.js` → `fe/public/client.js` 복사
+- `forte build`: `dist/public/client.js` 복사
+- E2E 테스트 통과
+
+## 다음 단계 (2차)
+
+---
+
+### 11. 프로덕션 에셋 해싱 ✅
+
+캐시 무효화를 위한 파일명 해싱 구현 완료.
+
+- `std::hash::DefaultHasher` 사용 (외부 의존성 없음)
+- `client.js` → `client.{hash}.js` 변환
+- `server.js` 내 경로 자동 치환
+- `dist/public/manifest.json` 생성
+- E2E 테스트 통과
+
+---
+
+### 12. 클라이언트 HMR (Hot Module Replacement) ✅
+
+개발 중 파일 변경 시 브라우저 자동 새로고침 (LiveReload) 구현 완료.
+
+**1단계: LiveReload 구현 완료**
+
+- `tokio-tungstenite`를 사용한 WebSocket 서버
+- `/__hmr` 엔드포인트에서 WebSocket 업그레이드
+- `HmrBroadcaster`로 다중 클라이언트 지원 (broadcast channel)
+- 파일 변경 → 빌드 완료 → WebSocket으로 "reload" 메시지 전송
+- 클라이언트에서 `location.reload()` 호출
+- 자동 재연결 (exponential backoff)
+
+**변경된 파일:**
+- `Cargo.toml`: tokio-tungstenite, futures-util 추가
+- `src/server/hmr.rs`: HmrBroadcaster 구현
+- `src/server/mod.rs`: WebSocket 업그레이드 핸들러
+- `src/cli/dev.rs`: 빌드 완료 시 reload 신호 전송
+- `src/cli/init.rs`: client.tsx에 HMR 클라이언트 코드 추가
+
+**2단계: React Fast Refresh (향후)**
+- `react-refresh` 패키지 추가
+- Rolldown 플러그인으로 Fast Refresh 변환 주입
+- 컴포넌트 상태 유지하면서 교체
+
+---
+
+## 구현 우선순위
+
+| 순서 | 기능 | 상태 | 난이도 |
+|------|------|------|--------|
+| 1 | Hydration 지원 | ✅ 완료 | 중 |
+| 2 | 에셋 해싱 | ✅ 완료 | 하 |
+| 3 | 클라이언트 HMR (LiveReload) | ✅ 완료 | 중 |
+| 4 | React Fast Refresh | ⏳ 향후 | 상 |
 
 ## 기술적 결정사항
 

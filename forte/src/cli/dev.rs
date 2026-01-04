@@ -117,12 +117,11 @@ fn scan_pages_dir(base_dir: &Path, current_dir: &Path, routes: &mut Vec<RouteInf
 
         if path.is_dir() {
             scan_pages_dir(base_dir, &path, routes)?;
-        } else if path.extension().is_some_and(|ext| ext == "rs") {
-            if has_handler_function(&path)? {
-                if let Some(route) = path_to_route(base_dir, &path) {
-                    routes.push(route);
-                }
-            }
+        } else if path.extension().is_some_and(|ext| ext == "rs")
+            && has_handler_function(&path)?
+            && let Some(route) = path_to_route(base_dir, &path)
+        {
+            routes.push(route);
         }
     }
     Ok(())
@@ -208,6 +207,13 @@ fn build_frontend(project_dir: &Path) -> Result<()> {
 
     if !status.success() {
         anyhow::bail!("npm run build failed with status: {}", status);
+    }
+
+    let client_src = fe_dir.join("dist/client.js");
+    let client_dst = fe_dir.join("public/client.js");
+    if client_src.exists() {
+        std::fs::copy(&client_src, &client_dst)?;
+        println!("[build] Copied client.js to public/");
     }
 
     Ok(())
@@ -297,16 +303,26 @@ async fn run_watch_loop(project_dir: &Path, handle: ServerHandle) -> Result<()> 
                     println!();
                     println!("[watch] Changes detected, rebuilding...");
 
-                    if backend_changed {
-                        if let Err(e) = rebuild_backend(project_dir, &handle).await {
-                            eprintln!("[watch] Backend rebuild failed: {}", e);
-                        }
+                    let mut backend_ok = true;
+                    let mut frontend_ok = true;
+
+                    if backend_changed
+                        && let Err(e) = rebuild_backend(project_dir, &handle).await
+                    {
+                        eprintln!("[watch] Backend rebuild failed: {}", e);
+                        backend_ok = false;
                     }
 
-                    if frontend_changed {
-                        if let Err(e) = rebuild_frontend(project_dir, &handle).await {
-                            eprintln!("[watch] Frontend rebuild failed: {}", e);
-                        }
+                    if frontend_changed
+                        && let Err(e) = rebuild_frontend(project_dir, &handle).await
+                    {
+                        eprintln!("[watch] Frontend rebuild failed: {}", e);
+                        frontend_ok = false;
+                    }
+
+                    if backend_ok && frontend_ok {
+                        handle.hmr.send_reload();
+                        println!("[watch] Sent reload signal to browser");
                     }
 
                     println!("[watch] Ready for requests");
