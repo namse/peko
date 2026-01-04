@@ -137,10 +137,50 @@ forte/src/
 - `src/cli/dev.rs`: 빌드 완료 시 reload 신호 전송
 - `src/cli/init.rs`: client.tsx에 HMR 클라이언트 코드 추가
 
-**2단계: React Fast Refresh (향후)**
-- `react-refresh` 패키지 추가
-- Rolldown 플러그인으로 Fast Refresh 변환 주입
-- 컴포넌트 상태 유지하면서 교체
+**2단계: Vite 통합 (진행 중)**
+
+Rolldown + OXC 대신 Vite로 전환하여 진정한 React Fast Refresh 지원.
+
+**아키텍처:**
+```
+[forte dev]
+  → codegen (forte-rs-to-ts, routes.generated.ts)
+  → cargo build (WASM)
+  → npx vite build --ssr (server.js for SSR)
+  → npx vite (dev server on random port)
+  → Forte 서버 시작 (port 3000)
+      ├── SSR: WASM 실행 → props → server.tsx 실행 → HTML
+      ├── Proxy: /@vite/*, /src/*, /@react-refresh → Vite
+      └── Static: /public/* → 정적 파일
+  → Watch (backend만) → WASM 재빌드 → WebSocket reload
+  → Frontend 변경 → Vite가 자동 HMR
+```
+
+**완료된 작업:**
+- `init.rs`: vite.config.ts, client.tsx, server.tsx 템플릿 업데이트
+- `init.rs`: package.json에서 scripts 제거 (Vite는 내부 구현 세부사항)
+- `server/mod.rs`: `dev_mode`, `fe_dir` 설정 추가
+- `server/mod.rs`: Vite 프로세스 시작 (`npx vite`)
+- `server/mod.rs`: Vite 준비 대기 (`wait_for_vite_ready`)
+- `server/mod.rs`: Vite proxy 로직 (`should_proxy_to_vite`, `proxy_to_vite`)
+- `dev.rs`: SSR용 server.js 빌드 (`npx vite build --ssr --mode development`)
+- `dev.rs`: Watch loop에서 frontend 감시 제거 (Vite가 HMR 처리)
+- `Cargo.toml`: reqwest, http 의존성 추가
+
+**남은 작업:**
+- [ ] E2E 테스트: SSR 동작 확인
+- [ ] E2E 테스트: React Fast Refresh 동작 확인
+- [ ] Vite 프로세스 정리 (Forte 종료 시 Vite도 종료)
+- [ ] `forte build` 업데이트 (production 빌드에서 Vite 사용)
+
+**현재 문제:**
+- 테스트 중 포트 충돌 발생 (이전 Vite 프로세스가 남아있음)
+- Vite 프로세스 lifecycle 관리 필요
+
+**해결 방향:**
+1. Vite Child 프로세스 핸들을 ServerHandle에 저장
+2. Forte 종료 시 (Ctrl+C 등) Vite 프로세스도 함께 종료
+3. 또는 Vite를 같은 프로세스 그룹으로 실행하여 자동 정리
 
 ---
 
@@ -151,7 +191,7 @@ forte/src/
 | 1 | Hydration 지원 | ✅ 완료 | 중 |
 | 2 | 에셋 해싱 | ✅ 완료 | 하 |
 | 3 | 클라이언트 HMR (LiveReload) | ✅ 완료 | 중 |
-| 4 | React Fast Refresh | ⏳ 향후 | 상 |
+| 4 | Vite 통합 (React Fast Refresh) | 🚧 진행 중 | 중 |
 
 ## 기술적 결정사항
 
@@ -161,9 +201,10 @@ forte/src/
 - `RUSTUP_TOOLCHAIN` 환경변수 제거하여 rust-toolchain.toml 사용
 
 ### 프론트엔드 번들링
-- rolldown 사용
+- Vite 사용 (dev: HMR, build: production bundle)
 - `globalThis.handler` 패턴으로 전역 핸들러 노출
-- `inlineDynamicImports: true`로 단일 번들 생성
+- SSR 빌드: `npx vite build --ssr src/server.tsx`
+- Client 빌드: `npx vite build` (production) / Vite dev server (development)
 
 ### 백엔드 패키지
 - 패키지 이름: `backend` (고정)

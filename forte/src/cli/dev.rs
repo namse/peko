@@ -194,26 +194,25 @@ fn build_backend(project_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-fn build_frontend(project_dir: &Path) -> Result<()> {
+fn build_server_js(project_dir: &Path) -> Result<()> {
     let fe_dir = project_dir.join("fe");
 
-    println!("[build] Building frontend...");
-    let status = Command::new("npm")
-        .arg("run")
+    println!("[build] Building server.js for SSR (dev mode)...");
+    let status = Command::new("npx")
+        .arg("vite")
         .arg("build")
+        .arg("--ssr")
+        .arg("src/server.tsx")
+        .arg("--outDir")
+        .arg("dist")
+        .arg("--mode")
+        .arg("development")
         .current_dir(&fe_dir)
         .status()
-        .context("Failed to run npm run build")?;
+        .context("Failed to build server.js")?;
 
     if !status.success() {
-        anyhow::bail!("npm run build failed with status: {}", status);
-    }
-
-    let client_src = fe_dir.join("dist/client.js");
-    let client_dst = fe_dir.join("public/client.js");
-    if client_src.exists() {
-        std::fs::copy(&client_src, &client_dst)?;
-        println!("[build] Copied client.js to public/");
+        anyhow::bail!("vite build --ssr failed with status: {}", status);
     }
 
     Ok(())
@@ -245,7 +244,7 @@ pub async fn run(options: DevOptions) -> Result<()> {
 
     run_codegen(&project_dir)?;
     build_backend(&project_dir)?;
-    build_frontend(&project_dir)?;
+    build_server_js(&project_dir)?;
 
     let backend_path = project_dir
         .join("rs/target/wasm32-wasip2/release/backend.wasm")
@@ -258,12 +257,15 @@ pub async fn run(options: DevOptions) -> Result<()> {
         .to_string();
 
     let public_dir = project_dir.join("fe/public");
+    let fe_dir = project_dir.join("fe");
 
     let config = ServerConfig {
         port,
         backend_path,
         frontend_path,
         public_dir,
+        fe_dir,
+        dev_mode: true,
     };
 
     let handle = server::run(config).await?;
@@ -277,50 +279,24 @@ async fn run_watch_loop(project_dir: &Path, handle: ServerHandle) -> Result<()> 
     let mut debouncer = new_debouncer(Duration::from_millis(500), tx)?;
 
     let rs_dir = project_dir.join("rs/src");
-    let fe_dir = project_dir.join("fe/src");
 
     debouncer.watcher().watch(&rs_dir, RecursiveMode::Recursive)?;
-    debouncer.watcher().watch(&fe_dir, RecursiveMode::Recursive)?;
 
-    println!("[watch] Watching for changes in rs/src and fe/src...");
+    println!("[watch] Watching for backend changes in rs/src...");
+    println!("[watch] Frontend HMR handled by Vite");
 
     loop {
         match rx.recv() {
             Ok(Ok(events)) => {
-                let mut backend_changed = false;
-                let mut frontend_changed = false;
+                let backend_changed = events.iter().any(|e| e.path.starts_with(&rs_dir));
 
-                for event in events {
-                    let path = &event.path;
-                    if path.starts_with(&rs_dir) {
-                        backend_changed = true;
-                    } else if path.starts_with(&fe_dir) {
-                        frontend_changed = true;
-                    }
-                }
-
-                if backend_changed || frontend_changed {
+                if backend_changed {
                     println!();
-                    println!("[watch] Changes detected, rebuilding...");
+                    println!("[watch] Backend changes detected, rebuilding...");
 
-                    let mut backend_ok = true;
-                    let mut frontend_ok = true;
-
-                    if backend_changed
-                        && let Err(e) = rebuild_backend(project_dir, &handle).await
-                    {
+                    if let Err(e) = rebuild_backend(project_dir, &handle).await {
                         eprintln!("[watch] Backend rebuild failed: {}", e);
-                        backend_ok = false;
-                    }
-
-                    if frontend_changed
-                        && let Err(e) = rebuild_frontend(project_dir, &handle).await
-                    {
-                        eprintln!("[watch] Frontend rebuild failed: {}", e);
-                        frontend_ok = false;
-                    }
-
-                    if backend_ok && frontend_ok {
+                    } else {
                         handle.hmr.send_reload();
                         println!("[watch] Sent reload signal to browser");
                     }
@@ -348,21 +324,13 @@ async fn rebuild_backend(project_dir: &Path, handle: &ServerHandle) -> Result<()
     println!("[rebuild] Building backend...");
     build_backend(project_dir)?;
 
+    println!("[rebuild] Building server.js...");
+    build_server_js(project_dir)?;
+
     handle.cache.invalidate("backend").await;
-    println!("[rebuild] Backend cache invalidated");
-
-    Ok(())
-}
-
-async fn rebuild_frontend(project_dir: &Path, handle: &ServerHandle) -> Result<()> {
-    println!("[rebuild] Running codegen...");
-    run_codegen(project_dir)?;
-
-    println!("[rebuild] Building frontend...");
-    build_frontend(project_dir)?;
-
     handle.cache.invalidate("frontend").await;
-    println!("[rebuild] Frontend cache invalidated");
+    println!("[rebuild] Caches invalidated");
 
     Ok(())
 }
+

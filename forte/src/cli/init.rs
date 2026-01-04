@@ -1,6 +1,7 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::fs;
 use std::path::Path;
+use std::process::Command;
 
 pub fn run(name: &str) -> Result<()> {
     let project_dir = Path::new(name);
@@ -55,8 +56,8 @@ pub fn run(name: &str) -> Result<()> {
     )?;
 
     fs::write(
-        project_dir.join("fe/rolldown.config.ts"),
-        generate_rolldown_config(),
+        project_dir.join("fe/vite.config.ts"),
+        generate_vite_config(),
     )?;
 
     fs::write(
@@ -79,11 +80,52 @@ pub fn run(name: &str) -> Result<()> {
         generate_robots_txt(),
     )?;
 
+    install_npm_packages(project_dir)?;
+
     println!("Created project '{}'", name);
     println!();
     println!("Next steps:");
     println!("  cd {}", name);
     println!("  forte dev");
+
+    Ok(())
+}
+
+fn install_npm_packages(project_dir: &Path) -> Result<()> {
+    let fe_dir = project_dir.join("fe");
+
+    println!("Installing npm packages...");
+
+    let deps = ["react", "react-dom"];
+    let status = Command::new("npm")
+        .arg("install")
+        .args(deps)
+        .current_dir(&fe_dir)
+        .status()
+        .context("Failed to run npm install")?;
+
+    if !status.success() {
+        anyhow::bail!("npm install failed");
+    }
+
+    let dev_deps = [
+        "@types/react",
+        "@types/react-dom",
+        "@vitejs/plugin-react",
+        "typescript",
+        "vite",
+    ];
+    let status = Command::new("npm")
+        .arg("install")
+        .arg("-D")
+        .args(dev_deps)
+        .current_dir(&fe_dir)
+        .status()
+        .context("Failed to run npm install -D")?;
+
+    if !status.success() {
+        anyhow::bail!("npm install -D failed");
+    }
 
     Ok(())
 }
@@ -226,20 +268,7 @@ fn generate_package_json(name: &str) -> String {
         r#"{{
   "name": "{name}-frontend",
   "private": true,
-  "type": "module",
-  "scripts": {{
-    "build": "rolldown -c"
-  }},
-  "dependencies": {{
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0"
-  }},
-  "devDependencies": {{
-    "@types/react": "^19.0.0",
-    "@types/react-dom": "^19.0.0",
-    "rolldown": "^1.0.0-beta.1",
-    "typescript": "^5.7.0"
-  }}
+  "type": "module"
 }}
 "#
     )
@@ -262,25 +291,27 @@ fn generate_tsconfig() -> &'static str {
 "#
 }
 
-fn generate_rolldown_config() -> &'static str {
-    r#"import { defineConfig } from "rolldown";
+fn generate_vite_config() -> &'static str {
+    r#"import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
 
-export default defineConfig([
-  {
-    input: "src/server.tsx",
-    output: {
-      file: "dist/server.js",
-      inlineDynamicImports: true,
+export default defineConfig({
+  plugins: [react()],
+  optimizeDeps: {
+    include: ["react", "react-dom"],
+  },
+  build: {
+    rollupOptions: {
+      input: "src/client.tsx",
+      output: {
+        entryFileNames: "client.js",
+      },
     },
   },
-  {
-    input: "src/client.tsx",
-    output: {
-      file: "dist/client.js",
-      inlineDynamicImports: true,
-    },
+  ssr: {
+    noExternal: true,
   },
-]);
+});
 "#
 }
 
@@ -318,6 +349,8 @@ function escapeJsonForScript(json: string): string {
     return json.replace(/</g, "\\u003c").replace(/>/g, "\\u003e");
 }
 
+const isDev = import.meta.env?.DEV ?? false;
+
 (globalThis as any).handler = async function handler(request: Request): Promise<Response> {
     const props = await request.json();
     const url = new URL(request.url);
@@ -329,17 +362,25 @@ function escapeJsonForScript(json: string): string {
         const html = renderToString(pageModule.default(allProps));
         const propsJson = escapeJsonForScript(JSON.stringify(allProps));
 
+        const viteScripts = isDev
+            ? `<script type="module" src="/@vite/client"></script>`
+            : "";
+        const clientScript = isDev
+            ? `/src/client.tsx`
+            : `/public/client.js`;
+
         return new Response(
             `<!DOCTYPE html>
 <html>
 <head>
     <meta charset="utf-8" />
     <title>Forte App</title>
+    ${viteScripts}
 </head>
 <body>
     <div id="root">${html}</div>
     <script>window.__FORTE_PROPS__ = ${propsJson};</script>
-    <script type="module" src="/public/client.js"></script>
+    <script type="module" src="${clientScript}"></script>
 </body>
 </html>`,
             {
@@ -407,40 +448,6 @@ function matchRoute(pathname: string): { route: typeof routes[0]; params: Record
     return null;
 }
 
-function setupHmr() {
-    let reconnectAttempts = 0;
-    const maxReconnectDelay = 5000;
-
-    function connect() {
-        const ws = new WebSocket(`ws://${location.host}/__hmr`);
-
-        ws.onopen = () => {
-            console.log("[HMR] Connected");
-            reconnectAttempts = 0;
-        };
-
-        ws.onmessage = (event) => {
-            if (event.data === "reload") {
-                console.log("[HMR] Reloading...");
-                location.reload();
-            }
-        };
-
-        ws.onclose = () => {
-            const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), maxReconnectDelay);
-            reconnectAttempts++;
-            console.log(`[HMR] Disconnected, reconnecting in ${delay}ms...`);
-            setTimeout(connect, delay);
-        };
-
-        ws.onerror = () => {
-            ws.close();
-        };
-    }
-
-    connect();
-}
-
 async function hydrate() {
     const props = (window as any).__FORTE_PROPS__;
     const matched = matchRoute(window.location.pathname);
@@ -453,6 +460,5 @@ async function hydrate() {
 }
 
 hydrate();
-setupHmr();
 "#
 }

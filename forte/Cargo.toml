@@ -7,8 +7,8 @@ edition = "2024"
 fn0 = { path = "../fn0" }
 adapt-cache = { path = "../adapt-cache" }
 tokio = { version = "1", features = ["full"] }
-hyper = { version = "1", features = ["server", "http1"] }
-hyper-util = { version = "0.1", features = ["service"] }
+hyper = { version = "1", features = ["server", "http1", "client"] }
+hyper-util = { version = "0.1", features = ["service", "client-legacy", "http1", "tokio"] }
 bytes = "1"
 anyhow = "1"
 tracing = "0.1"
@@ -20,6 +20,8 @@ notify = "8"
 notify-debouncer-mini = "0.6"
 tokio-tungstenite = "0.24"
 futures-util = "0.3"
+http = "1"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 
 [dev-dependencies]
 assert_cmd = "2"

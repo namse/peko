@@ -1,11 +1,11 @@
-use assert_cmd::Command;
+use assert_cmd::cargo;
 use std::io::{BufRead, BufReader};
 use std::process::{Child, Stdio};
 use std::sync::mpsc;
 use std::time::Duration;
 
 fn get_forte_bin_path() -> std::path::PathBuf {
-    std::path::PathBuf::from(Command::cargo_bin("forte").unwrap().get_program())
+    cargo::cargo_bin!("forte").to_path_buf()
 }
 
 struct DevServer {
@@ -45,7 +45,9 @@ impl DevServer {
             }
         });
 
-        let port = rx.recv_timeout(Duration::from_secs(120)).expect("Timeout waiting for server to start");
+        let port = rx
+            .recv_timeout(Duration::from_secs(120))
+            .expect("Timeout waiting for server to start");
 
         Self {
             child,
@@ -67,8 +69,7 @@ impl Drop for DevServer {
 }
 
 fn init_project(temp_dir: &std::path::Path, name: &str) -> std::path::PathBuf {
-    Command::cargo_bin("forte")
-        .unwrap()
+    cargo::cargo_bin_cmd!("forte")
         .args(["init", name])
         .current_dir(temp_dir)
         .assert()

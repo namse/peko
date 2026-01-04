@@ -1,9 +1,8 @@
-use assert_cmd::Command;
+use assert_cmd::cargo;
 use predicates::prelude::*;
 
 fn setup_project(temp: &tempfile::TempDir) -> std::path::PathBuf {
-    Command::cargo_bin("forte")
-        .unwrap()
+    cargo::cargo_bin_cmd!("forte")
         .args(["init", "my-app"])
         .current_dir(temp)
         .assert()
@@ -25,8 +24,7 @@ fn test_build_creates_dist() {
     let temp = tempfile::tempdir().unwrap();
     let project_dir = setup_project(&temp);
 
-    Command::cargo_bin("forte")
-        .unwrap()
+    cargo::cargo_bin_cmd!("forte")
         .args(["build"])
         .current_dir(&project_dir)
         .assert()
@@ -42,8 +40,7 @@ fn test_build_creates_dist() {
 fn test_build_fails_outside_project() {
     let temp = tempfile::tempdir().unwrap();
 
-    Command::cargo_bin("forte")
-        .unwrap()
+    cargo::cargo_bin_cmd!("forte")
         .args(["build"])
         .current_dir(&temp)
         .assert()

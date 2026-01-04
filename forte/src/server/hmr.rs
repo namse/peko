@@ -17,7 +17,7 @@ impl HmrBroadcaster {
     }
 
     pub fn send_reload(&self) {
-        let _ = self.tx.send("reload".to_string());
+        let _ = self.tx.send(r#"{"type":"reload"}"#.to_string());
     }
 }
 

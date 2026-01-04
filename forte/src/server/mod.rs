@@ -4,7 +4,7 @@ mod hmr;
 pub use cache::SimpleCache;
 pub use hmr::HmrBroadcaster;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use fn0::{CodeKind, DeploymentMap, Fn0};
 use futures_util::{SinkExt, StreamExt};
 use http_body_util::{BodyExt, Full, combinators::UnsyncBoxBody};
@@ -13,7 +13,7 @@ use hyper::service::service_fn;
 use hyper::{Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio_tungstenite::tungstenite::handshake::derive_accept_key;
@@ -24,6 +24,8 @@ pub struct ServerConfig {
     pub backend_path: String,
     pub frontend_path: String,
     pub public_dir: PathBuf,
+    pub fe_dir: PathBuf,
+    pub dev_mode: bool,
 }
 
 pub struct ServerHandle {
@@ -41,6 +43,16 @@ pub async fn run(config: ServerConfig) -> Result<ServerHandle> {
     let handle = ServerHandle {
         cache: cache.clone(),
         hmr: hmr.clone(),
+    };
+
+    let vite_port = if config.dev_mode {
+        let port = find_available_port(5173)?;
+        start_vite(&config.fe_dir, port)?;
+        wait_for_vite_ready(port).await?;
+        println!("[vite] Dev server ready on port {}", port);
+        Some(port)
+    } else {
+        None
     };
 
     let fn0 = Arc::new(Fn0::new(cache.clone(), cache, deployment_map));
@@ -71,7 +83,7 @@ pub async fn run(config: ServerConfig) -> Result<ServerHandle> {
                         let fn0 = fn0_clone.clone();
                         let public_dir = public_dir_clone.clone();
                         let hmr = hmr_clone.clone();
-                        handle_request(req, fn0, public_dir, hmr)
+                        handle_request(req, fn0, public_dir, hmr, vite_port)
                     }),
                 );
                 if let Err(err) = conn.with_upgrades().await {
@@ -84,11 +96,54 @@ pub async fn run(config: ServerConfig) -> Result<ServerHandle> {
     Ok(handle)
 }
 
+fn find_available_port(start: u16) -> Result<u16> {
+    use std::net::TcpListener;
+    for port in start..=65535 {
+        if TcpListener::bind(("127.0.0.1", port)).is_ok() {
+            return Ok(port);
+        }
+    }
+    anyhow::bail!("No available port found starting from {}", start)
+}
+
+fn start_vite(fe_dir: &Path, port: u16) -> Result<()> {
+    use std::process::Command;
+
+    println!("[vite] Starting dev server on port {}...", port);
+    Command::new("npx")
+        .arg("vite")
+        .arg("--port")
+        .arg(port.to_string())
+        .arg("--strictPort")
+        .current_dir(fe_dir)
+        .spawn()
+        .context("Failed to start Vite dev server")?;
+
+    Ok(())
+}
+
+async fn wait_for_vite_ready(port: u16) -> Result<()> {
+    use std::time::Duration;
+    use tokio::time::sleep;
+
+    let url = format!("http://127.0.0.1:{}", port);
+    for _ in 0..50 {
+        if let Ok(resp) = reqwest::get(&url).await {
+            if resp.status().is_success() || resp.status().as_u16() == 404 {
+                return Ok(());
+            }
+        }
+        sleep(Duration::from_millis(100)).await;
+    }
+    anyhow::bail!("Vite dev server failed to start within 5 seconds")
+}
+
 async fn handle_request(
     req: Request<hyper::body::Incoming>,
     fn0: Arc<Fn0<SimpleCache>>,
     public_dir: Arc<PathBuf>,
     hmr: HmrBroadcaster,
+    vite_port: Option<u16>,
 ) -> Result<fn0::Response> {
     let uri = req.uri().clone();
     let path = uri.path();
@@ -96,6 +151,12 @@ async fn handle_request(
 
     if path == "/__hmr" {
         return handle_hmr_upgrade(req, hmr).await;
+    }
+
+    if let Some(vite_port) = vite_port
+        && should_proxy_to_vite(path)
+    {
+        return proxy_to_vite(req, vite_port).await;
     }
 
     if let Some(static_response) = try_serve_static(&public_dir, path).await {
@@ -312,6 +373,57 @@ async fn handle_hmr_upgrade(
         .header("sec-websocket-accept", accept_key)
         .body(
             Full::new(bytes::Bytes::new())
+                .map_err(|e| anyhow::anyhow!("{e}"))
+                .boxed_unsync(),
+        )?)
+}
+
+fn should_proxy_to_vite(path: &str) -> bool {
+    path.starts_with("/@vite/")
+        || path.starts_with("/@react-refresh")
+        || path.starts_with("/src/")
+        || path.starts_with("/node_modules/")
+}
+
+async fn proxy_to_vite(
+    req: Request<hyper::body::Incoming>,
+    vite_port: u16,
+) -> Result<fn0::Response> {
+    let method = req.method().clone();
+    let uri = req.uri().clone();
+    let headers = req.headers().clone();
+
+    let url = format!("http://127.0.0.1:{}{}", vite_port, uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/"));
+
+    let client = reqwest::Client::new();
+    let mut builder = client.request(method.clone(), &url);
+
+    for (name, value) in headers.iter() {
+        if name != "host" {
+            if let Ok(v) = value.to_str() {
+                builder = builder.header(name.as_str(), v);
+            }
+        }
+    }
+
+    let body_bytes = req.collect().await?.to_bytes();
+    if !body_bytes.is_empty() {
+        builder = builder.body(body_bytes.to_vec());
+    }
+
+    let resp = builder.send().await.context("Failed to proxy to Vite")?;
+
+    let status = StatusCode::from_u16(resp.status().as_u16())?;
+    let mut response_builder = Response::builder().status(status);
+
+    for (name, value) in resp.headers().iter() {
+        response_builder = response_builder.header(name.as_str(), value.as_bytes());
+    }
+
+    let body = resp.bytes().await?;
+    Ok(response_builder
+        .body(
+            Full::new(body)
                 .map_err(|e| anyhow::anyhow!("{e}"))
                 .boxed_unsync(),
         )?)
