@@ -1,3 +1,4 @@
+use crate::server::{self, ServerConfig, ServerHandle};
 use anyhow::{Context, Result};
 use notify_debouncer_mini::{new_debouncer, notify::RecursiveMode};
 use std::fs;
@@ -6,8 +7,6 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::mpsc::channel;
 use std::time::Duration;
-
-use crate::server::{self, ServerConfig, ServerHandle};
 
 #[derive(Debug)]
 pub struct DevOptions {
@@ -169,7 +168,13 @@ fn build_fe_page_path(route_path: &str) -> String {
             .replace(":", "[")
             .split('/')
             .filter(|s| !s.is_empty())
-            .map(|s| if s.starts_with('[') { format!("{}]", s) } else { s.to_string() })
+            .map(|s| {
+                if s.starts_with('[') {
+                    format!("{}]", s)
+                } else {
+                    s.to_string()
+                }
+            })
             .collect::<Vec<_>>()
             .join("/");
         format!("./pages/{}/page", path)
@@ -194,6 +199,7 @@ fn build_backend(project_dir: &Path) -> Result<()> {
     Ok(())
 }
 
+#[allow(dead_code)]
 fn build_server_js(project_dir: &Path) -> Result<()> {
     let fe_dir = project_dir.join("fe");
 
@@ -244,7 +250,6 @@ pub async fn run(options: DevOptions) -> Result<()> {
 
     run_codegen(&project_dir)?;
     build_backend(&project_dir)?;
-    build_server_js(&project_dir)?;
 
     let backend_path = project_dir
         .join("rs/target/wasm32-wasip2/release/backend.wasm")
@@ -280,7 +285,9 @@ async fn run_watch_loop(project_dir: &Path, handle: ServerHandle) -> Result<()> 
 
     let rs_dir = project_dir.join("rs/src");
 
-    debouncer.watcher().watch(&rs_dir, RecursiveMode::Recursive)?;
+    debouncer
+        .watcher()
+        .watch(&rs_dir, RecursiveMode::Recursive)?;
 
     println!("[watch] Watching for backend changes in rs/src...");
     println!("[watch] Frontend HMR handled by Vite");
@@ -324,13 +331,8 @@ async fn rebuild_backend(project_dir: &Path, handle: &ServerHandle) -> Result<()
     println!("[rebuild] Building backend...");
     build_backend(project_dir)?;
 
-    println!("[rebuild] Building server.js...");
-    build_server_js(project_dir)?;
-
     handle.cache.invalidate("backend").await;
-    handle.cache.invalidate("frontend").await;
-    println!("[rebuild] Caches invalidated");
+    println!("[rebuild] Backend cache invalidated");
 
     Ok(())
 }
-

@@ -1,12 +1,11 @@
-use assert_cmd::Command;
+use assert_cmd::cargo;
 use predicates::prelude::*;
 
 #[test]
 fn test_init_creates_project_structure() {
     let temp = tempfile::tempdir().unwrap();
 
-    Command::cargo_bin("forte")
-        .unwrap()
+    cargo::cargo_bin_cmd!("forte")
         .args(["init", "my-app"])
         .current_dir(&temp)
         .assert()
@@ -36,8 +35,7 @@ fn test_init_fails_if_directory_exists() {
 
     std::fs::create_dir(temp.path().join("my-app")).unwrap();
 
-    Command::cargo_bin("forte")
-        .unwrap()
+    cargo::cargo_bin_cmd!("forte")
         .args(["init", "my-app"])
         .current_dir(&temp)
         .assert()
@@ -49,8 +47,7 @@ fn test_init_fails_if_directory_exists() {
 fn test_init_requires_project_name() {
     let temp = tempfile::tempdir().unwrap();
 
-    Command::cargo_bin("forte")
-        .unwrap()
+    cargo::cargo_bin_cmd!("forte")
         .args(["init"])
         .current_dir(&temp)
         .assert()

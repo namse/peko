@@ -2629,6 +2629,7 @@ dependencies = [
  "notify-debouncer-mini",
  "predicates",
  "reqwest",
+ "serde_json",
  "tempfile",
  "tokio",
  "tokio-tungstenite",

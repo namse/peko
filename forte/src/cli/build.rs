@@ -103,7 +103,11 @@ fn generate_frontend_routes(project_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-fn scan_pages_dir(base_dir: &Path, current_dir: &Path, routes: &mut Vec<(String, String)>) -> Result<()> {
+fn scan_pages_dir(
+    base_dir: &Path,
+    current_dir: &Path,
+    routes: &mut Vec<(String, String)>,
+) -> Result<()> {
     for entry in fs::read_dir(current_dir)? {
         let entry = entry?;
         let path = entry.path();
@@ -159,7 +163,13 @@ fn build_fe_page_path(route_path: &str) -> String {
             .replace(":", "[")
             .split('/')
             .filter(|s| !s.is_empty())
-            .map(|s| if s.starts_with('[') { format!("{}]", s) } else { s.to_string() })
+            .map(|s| {
+                if s.starts_with('[') {
+                    format!("{}]", s)
+                } else {
+                    s.to_string()
+                }
+            })
             .collect::<Vec<_>>()
             .join("/");
         format!("./pages/{}/page", path)
@@ -211,7 +221,7 @@ fn create_dist(project_dir: &Path, dist_dir: &Path) -> Result<()> {
     fs::create_dir_all(dist_dir)?;
 
     let backend_wasm = project_dir.join("rs/target/wasm32-wasip2/release/backend.wasm");
-    let frontend_js = project_dir.join("fe/dist/server.js");
+    let frontend_js = project_dir.join("fe/dist/ssr/server.js");
     let client_js = project_dir.join("fe/dist/client.js");
     let public_dir = project_dir.join("fe/public");
 
@@ -234,10 +244,8 @@ fn create_dist(project_dir: &Path, dist_dir: &Path) -> Result<()> {
     println!("[dist] Copied {} (hashed)", hashed_filename);
 
     let server_content = fs::read_to_string(&frontend_js)?;
-    let updated_content = server_content.replace(
-        "/public/client.js",
-        &format!("/public/{}", hashed_filename),
-    );
+    let updated_content =
+        server_content.replace("/public/client.js", &format!("/public/{}", hashed_filename));
     fs::write(dist_dir.join("server.js"), updated_content)?;
     println!("[dist] Copied server.js (updated client path)");
 

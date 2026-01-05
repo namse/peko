@@ -22,9 +22,15 @@ pub fn add_page(path: &str) -> Result<()> {
 
     let component_name = path_to_component_name(&page_path);
 
-    fs::write(rs_page_dir.join("mod.rs"), generate_backend_page(&page_path))?;
+    fs::write(
+        rs_page_dir.join("mod.rs"),
+        generate_backend_page(&page_path),
+    )?;
 
-    fs::write(fe_page_dir.join("page.tsx"), generate_frontend_page(&component_name))?;
+    fs::write(
+        fe_page_dir.join("page.tsx"),
+        generate_frontend_page(&component_name),
+    )?;
 
     println!("Created page '{}'", path);
     println!("  - rs/src/pages/{}/mod.rs", page_path);
@@ -167,7 +173,10 @@ pub fn add_action(path: &str) -> Result<()> {
     let action_name = path_to_action_name(&action_path);
 
     fs::write(&rs_action_file, generate_backend_action(&action_name))?;
-    fs::write(&fe_action_file, generate_frontend_action(&action_name, &action_path))?;
+    fs::write(
+        &fe_action_file,
+        generate_frontend_action(&action_name, &action_path),
+    )?;
 
     println!("Created action '{}'", path);
     println!("  - rs/src/actions/{}.rs", action_path);

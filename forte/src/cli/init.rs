@@ -15,60 +15,39 @@ pub fn run(name: &str) -> Result<()> {
     fs::create_dir_all(project_dir.join("fe/src/pages/index"))?;
     fs::create_dir_all(project_dir.join("fe/public"))?;
 
-    fs::write(
-        project_dir.join("Forte.toml"),
-        generate_forte_toml(name),
-    )?;
+    fs::write(project_dir.join("Forte.toml"), generate_forte_toml(name))?;
 
-    fs::write(
-        project_dir.join("rs/Cargo.toml"),
-        generate_cargo_toml(),
-    )?;
+    fs::write(project_dir.join("rs/Cargo.toml"), generate_cargo_toml())?;
 
     fs::write(
         project_dir.join("rs/.cargo/config.toml"),
         generate_cargo_config(),
     )?;
 
-    fs::write(
-        project_dir.join("rs/src/lib.rs"),
-        generate_lib_rs(),
-    )?;
+    fs::write(project_dir.join("rs/src/lib.rs"), generate_lib_rs())?;
 
     fs::write(
         project_dir.join("rs/src/pages/index/mod.rs"),
         generate_index_mod_rs(),
     )?;
 
-    fs::write(
-        project_dir.join("rs/build.rs"),
-        generate_build_rs(),
-    )?;
+    fs::write(project_dir.join("rs/build.rs"), generate_build_rs())?;
 
     fs::write(
         project_dir.join("fe/package.json"),
         generate_package_json(name),
     )?;
 
-    fs::write(
-        project_dir.join("fe/tsconfig.json"),
-        generate_tsconfig(),
-    )?;
+    fs::write(project_dir.join("fe/tsconfig.json"), generate_tsconfig())?;
 
     fs::write(
         project_dir.join("fe/vite.config.ts"),
         generate_vite_config(),
     )?;
 
-    fs::write(
-        project_dir.join("fe/src/server.tsx"),
-        generate_server_tsx(),
-    )?;
+    fs::write(project_dir.join("fe/src/server.tsx"), generate_server_tsx())?;
 
-    fs::write(
-        project_dir.join("fe/src/client.tsx"),
-        generate_client_tsx(),
-    )?;
+    fs::write(project_dir.join("fe/src/client.tsx"), generate_client_tsx())?;
 
     fs::write(
         project_dir.join("fe/src/pages/index/page.tsx"),
@@ -78,6 +57,11 @@ pub fn run(name: &str) -> Result<()> {
     fs::write(
         project_dir.join("fe/public/robots.txt"),
         generate_robots_txt(),
+    )?;
+
+    fs::write(
+        project_dir.join("fe/dev-server.mjs"),
+        generate_dev_server_mjs(),
     )?;
 
     install_npm_packages(project_dir)?;
@@ -112,6 +96,7 @@ fn install_npm_packages(project_dir: &Path) -> Result<()> {
         "@types/react",
         "@types/react-dom",
         "@vitejs/plugin-react",
+        "express",
         "typescript",
         "vite",
     ];
@@ -134,13 +119,6 @@ fn generate_forte_toml(name: &str) -> String {
     format!(
         r#"[project]
 name = "{name}"
-
-[dev]
-port = 3000
-
-[paths]
-backend = "rs"
-frontend = "fe"
 "#
     )
 }
@@ -268,7 +246,10 @@ fn generate_package_json(name: &str) -> String {
         r#"{{
   "name": "{name}-frontend",
   "private": true,
-  "type": "module"
+  "type": "module",
+  "scripts": {{
+    "build": "vite build && vite build --ssr src/server.tsx --outDir dist/ssr"
+  }}
 }}
 "#
     )
@@ -292,26 +273,38 @@ fn generate_tsconfig() -> &'static str {
 }
 
 fn generate_vite_config() -> &'static str {
-    r#"import { defineConfig } from "vite";
+    r#"import { defineConfig, Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 
-export default defineConfig({
-  plugins: [react()],
+function exitOnStdinClose(): Plugin {
+  return {
+    name: "exit-on-stdin-close",
+    configureServer() {
+      process.stdin.resume();
+      process.stdin.on("close", () => {
+        process.exit(0);
+      });
+    },
+  };
+}
+
+export default defineConfig(({ isSsrBuild }) => ({
+  plugins: [react(), exitOnStdinClose()],
   optimizeDeps: {
     include: ["react", "react-dom"],
   },
   build: {
     rollupOptions: {
-      input: "src/client.tsx",
+      input: isSsrBuild ? "src/server.tsx" : "src/client.tsx",
       output: {
-        entryFileNames: "client.js",
+        entryFileNames: isSsrBuild ? "server.js" : "client.js",
       },
     },
   },
   ssr: {
-    noExternal: true,
+    external: ["react", "react-dom"],
   },
-});
+}));
 "#
 }
 
@@ -350,6 +343,37 @@ function escapeJsonForScript(json: string): string {
 }
 
 const isDev = import.meta.env?.DEV ?? false;
+
+export async function render(url: string, props: any): Promise<string> {
+    const urlObj = new URL(url, "http://localhost");
+    const matched = matchRoute(urlObj.pathname);
+
+    if (!matched) {
+        return "Not Found";
+    }
+
+    const allProps = { ...props, params: matched.params };
+    const pageModule = await matched.route.component();
+    const html = renderToString(pageModule.default(allProps));
+    const propsJson = escapeJsonForScript(JSON.stringify(allProps));
+
+    const viteScripts = `<script type="module" src="/@vite/client"></script>`;
+    const clientScript = `/src/client.tsx`;
+
+    return `<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <title>Forte App</title>
+    ${viteScripts}
+</head>
+<body>
+    <div id="root">${html}</div>
+    <script>window.__FORTE_PROPS__ = ${propsJson};</script>
+    <script type="module" src="${clientScript}"></script>
+</body>
+</html>`;
+}
 
 (globalThis as any).handler = async function handler(request: Request): Promise<Response> {
     const props = await request.json();
@@ -415,6 +439,51 @@ export default function IndexPage(props: Props) {
 fn generate_robots_txt() -> &'static str {
     r#"User-agent: *
 Allow: /
+"#
+}
+
+fn generate_dev_server_mjs() -> &'static str {
+    r#"import express from "express";
+import { createServer as createViteServer } from "vite";
+import { createServer } from "http";
+
+async function startDevServer() {
+  const app = express();
+  app.use(express.json({ limit: "50mb" }));
+
+  const vite = await createViteServer({
+    server: { middlewareMode: true },
+    appType: "custom",
+  });
+
+  app.use(vite.middlewares);
+
+  app.post("/__ssr_render", async (req, res) => {
+    try {
+      const { url, props } = req.body;
+      const serverModule = await vite.ssrLoadModule("/src/server.tsx");
+      const html = await serverModule.render(url, props);
+      res.set("Content-Type", "text/html");
+      res.send(html);
+    } catch (e) {
+      vite.ssrFixStacktrace(e);
+      console.error(e);
+      res.status(500).send(`SSR Error: ${e.message}`);
+    }
+  });
+
+  const server = createServer(app);
+
+  server.listen(0, "127.0.0.1", () => {
+    const addr = server.address();
+    console.log(JSON.stringify({ port: addr.port }));
+  });
+
+  process.stdin.resume();
+  process.stdin.on("close", () => process.exit(0));
+}
+
+startDevServer();
 "#
 }
 

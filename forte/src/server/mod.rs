@@ -1,12 +1,11 @@
 mod cache;
 mod hmr;
 
-pub use cache::SimpleCache;
-pub use hmr::HmrBroadcaster;
-
 use anyhow::{Context, Result};
+pub use cache::SimpleCache;
 use fn0::{CodeKind, DeploymentMap, Fn0};
 use futures_util::{SinkExt, StreamExt};
+pub use hmr::HmrBroadcaster;
 use http_body_util::{BodyExt, Full, combinators::UnsyncBoxBody};
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
@@ -16,8 +15,8 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::net::TcpListener;
-use tokio_tungstenite::tungstenite::handshake::derive_accept_key;
 use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::handshake::derive_accept_key;
 
 pub struct ServerConfig {
     pub port: u16,
@@ -31,6 +30,8 @@ pub struct ServerConfig {
 pub struct ServerHandle {
     pub cache: SimpleCache,
     pub hmr: HmrBroadcaster,
+    _vite_child: Option<std::process::Child>,
+    _ssr_adapter_child: Option<std::process::Child>,
 }
 
 pub async fn run(config: ServerConfig) -> Result<ServerHandle> {
@@ -40,19 +41,29 @@ pub async fn run(config: ServerConfig) -> Result<ServerHandle> {
 
     let cache = SimpleCache::new(config.backend_path.clone(), config.frontend_path.clone());
     let hmr = HmrBroadcaster::new();
+
+    let (vite_port, vite_child) = if config.dev_mode {
+        let port = find_available_port(5173)?;
+        let child = start_vite(&config.fe_dir, port)?;
+        wait_for_vite_ready(port).await?;
+        println!("[vite] Dev server ready on port {}", port);
+        (Some(port), Some(child))
+    } else {
+        (None, None)
+    };
+
+    let (ssr_adapter_port, ssr_adapter_child) = if config.dev_mode {
+        let (port, child) = start_ssr_adapter(&config.fe_dir)?;
+        (Some(port), Some(child))
+    } else {
+        (None, None)
+    };
+
     let handle = ServerHandle {
         cache: cache.clone(),
         hmr: hmr.clone(),
-    };
-
-    let vite_port = if config.dev_mode {
-        let port = find_available_port(5173)?;
-        start_vite(&config.fe_dir, port)?;
-        wait_for_vite_ready(port).await?;
-        println!("[vite] Dev server ready on port {}", port);
-        Some(port)
-    } else {
-        None
+        _vite_child: vite_child,
+        _ssr_adapter_child: ssr_adapter_child,
     };
 
     let fn0 = Arc::new(Fn0::new(cache.clone(), cache, deployment_map));
@@ -83,7 +94,7 @@ pub async fn run(config: ServerConfig) -> Result<ServerHandle> {
                         let fn0 = fn0_clone.clone();
                         let public_dir = public_dir_clone.clone();
                         let hmr = hmr_clone.clone();
-                        handle_request(req, fn0, public_dir, hmr, vite_port)
+                        handle_request(req, fn0, public_dir, hmr, vite_port, ssr_adapter_port)
                     }),
                 );
                 if let Err(err) = conn.with_upgrades().await {
@@ -106,32 +117,33 @@ fn find_available_port(start: u16) -> Result<u16> {
     anyhow::bail!("No available port found starting from {}", start)
 }
 
-fn start_vite(fe_dir: &Path, port: u16) -> Result<()> {
-    use std::process::Command;
+fn start_vite(fe_dir: &Path, port: u16) -> Result<std::process::Child> {
+    use std::process::{Command, Stdio};
 
     println!("[vite] Starting dev server on port {}...", port);
-    Command::new("npx")
+    let child = Command::new("npx")
         .arg("vite")
         .arg("--port")
         .arg(port.to_string())
         .arg("--strictPort")
         .current_dir(fe_dir)
+        .stdin(Stdio::piped())
         .spawn()
         .context("Failed to start Vite dev server")?;
 
-    Ok(())
+    Ok(child)
 }
 
 async fn wait_for_vite_ready(port: u16) -> Result<()> {
     use std::time::Duration;
     use tokio::time::sleep;
 
-    let url = format!("http://127.0.0.1:{}", port);
+    let url = format!("http://localhost:{}", port);
     for _ in 0..50 {
-        if let Ok(resp) = reqwest::get(&url).await {
-            if resp.status().is_success() || resp.status().as_u16() == 404 {
-                return Ok(());
-            }
+        if let Ok(resp) = reqwest::get(&url).await
+            && (resp.status().is_success() || resp.status().as_u16() == 404)
+        {
+            return Ok(());
         }
         sleep(Duration::from_millis(100)).await;
     }
@@ -144,6 +156,7 @@ async fn handle_request(
     public_dir: Arc<PathBuf>,
     hmr: HmrBroadcaster,
     vite_port: Option<u16>,
+    ssr_adapter_port: Option<u16>,
 ) -> Result<fn0::Response> {
     let uri = req.uri().clone();
     let path = uri.path();
@@ -199,6 +212,11 @@ async fn handle_request(
         ));
     }
 
+    if let Some(ssr_port) = ssr_adapter_port {
+        println!("Calling SSR adapter on port {}", ssr_port);
+        return call_ssr_adapter(ssr_port, &uri, backend_response).await;
+    }
+
     println!("Preparing frontend request with backend response body");
     let frontend_request = Request::builder()
         .method("POST")
@@ -245,7 +263,11 @@ async fn try_serve_static(public_dir: &PathBuf, path: &str) -> Option<fn0::Respo
     match tokio::fs::read(&file_path).await {
         Ok(contents) => {
             let content_type = get_content_type(&file_path);
-            println!("[static] Serving {} ({})", file_path.display(), content_type);
+            println!(
+                "[static] Serving {} ({})",
+                file_path.display(),
+                content_type
+            );
 
             Some(
                 Response::builder()
@@ -312,13 +334,11 @@ async fn handle_hmr_upgrade(
         .map(|s| s.to_string());
 
     let Some(ws_key) = ws_key else {
-        return Ok(Response::builder()
-            .status(StatusCode::BAD_REQUEST)
-            .body(
-                Full::new(bytes::Bytes::from("Missing WebSocket key"))
-                    .map_err(|e| anyhow::anyhow!("{e}"))
-                    .boxed_unsync(),
-            )?);
+        return Ok(Response::builder().status(StatusCode::BAD_REQUEST).body(
+            Full::new(bytes::Bytes::from("Missing WebSocket key"))
+                .map_err(|e| anyhow::anyhow!("{e}"))
+                .boxed_unsync(),
+        )?);
     };
 
     let accept_key = derive_accept_key(ws_key.as_bytes());
@@ -393,16 +413,20 @@ async fn proxy_to_vite(
     let uri = req.uri().clone();
     let headers = req.headers().clone();
 
-    let url = format!("http://127.0.0.1:{}{}", vite_port, uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/"));
+    let url = format!(
+        "http://127.0.0.1:{}{}",
+        vite_port,
+        uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/")
+    );
 
     let client = reqwest::Client::new();
     let mut builder = client.request(method.clone(), &url);
 
     for (name, value) in headers.iter() {
-        if name != "host" {
-            if let Ok(v) = value.to_str() {
-                builder = builder.header(name.as_str(), v);
-            }
+        if name != "host"
+            && let Ok(v) = value.to_str()
+        {
+            builder = builder.header(name.as_str(), v);
         }
     }
 
@@ -421,11 +445,76 @@ async fn proxy_to_vite(
     }
 
     let body = resp.bytes().await?;
-    Ok(response_builder
+    Ok(response_builder.body(
+        Full::new(body)
+            .map_err(|e| anyhow::anyhow!("{e}"))
+            .boxed_unsync(),
+    )?)
+}
+
+fn start_ssr_adapter(fe_dir: &Path) -> Result<(u16, std::process::Child)> {
+    use std::io::{BufRead, BufReader};
+    use std::process::{Command, Stdio};
+
+    println!("[ssr] Starting SSR adapter...");
+    let mut child = Command::new("node")
+        .arg("dev-server.mjs")
+        .current_dir(fe_dir)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .context("Failed to start SSR adapter")?;
+
+    let stdout = child.stdout.take().unwrap();
+    let reader = BufReader::new(stdout);
+
+    for line in reader.lines() {
+        let line = line?;
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&line)
+            && let Some(port) = json.get("port").and_then(|p| p.as_u64())
+        {
+            println!("[ssr] SSR adapter ready on port {}", port);
+            return Ok((port as u16, child));
+        }
+    }
+
+    anyhow::bail!("Failed to get SSR adapter port")
+}
+
+async fn call_ssr_adapter(
+    port: u16,
+    uri: &hyper::Uri,
+    backend_response: fn0::Response,
+) -> Result<fn0::Response> {
+    let url = format!("http://127.0.0.1:{}/__ssr_render", port);
+
+    let (_, body) = backend_response.into_parts();
+    let body_bytes = body.collect().await?.to_bytes();
+    let props: serde_json::Value = serde_json::from_slice(&body_bytes)?;
+
+    let payload = serde_json::json!({
+        "url": uri.to_string(),
+        "props": props,
+    });
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(&url)
+        .json(&payload)
+        .send()
+        .await
+        .context("Failed to call SSR adapter")?;
+
+    let status = StatusCode::from_u16(resp.status().as_u16())?;
+    let html = resp.bytes().await?;
+
+    Ok(Response::builder()
+        .status(status)
+        .header("content-type", "text/html; charset=utf-8")
         .body(
-            Full::new(body)
+            Full::new(html)
                 .map_err(|e| anyhow::anyhow!("{e}"))
                 .boxed_unsync(),
         )?)
 }
-
