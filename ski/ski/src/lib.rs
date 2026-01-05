@@ -34,14 +34,14 @@ pub async fn run(code: &str, request: Request) -> Result<Response> {
             register_hyper_request(&mut runtime, request);
 
             eprintln!("[ski/lib.rs] Executing __ski_runHandler()...");
-            let script_result = runtime.execute_script(
-                "[run]",
-                ascii_str!("globalThis.__ski_runHandler();"),
-            )?;
+            let script_result =
+                runtime.execute_script("[run]", ascii_str!("globalThis.__ski_runHandler();"))?;
             eprintln!("[ski/lib.rs] Script executed, resolving future...");
             let run_future = runtime.resolve(script_result);
             eprintln!("[ski/lib.rs] Awaiting run_future with event loop...");
-            runtime.with_event_loop_future(run_future, Default::default()).await?;
+            runtime
+                .with_event_loop_future(run_future, Default::default())
+                .await?;
             eprintln!("[ski/lib.rs] Handler completed");
 
             eprintln!("[ski/lib.rs] Getting op_state...");
@@ -53,7 +53,10 @@ pub async fn run(code: &str, request: Request) -> Result<Response> {
                 .try_take::<ResponseParts>()
                 .ok_or_else(|| anyhow!("Did not get a response from JavaScript"))?;
 
-            eprintln!("[ski/lib.rs] Got ResponseParts: status={}, rid={:?}", response_parts.status, response_parts.rid);
+            eprintln!(
+                "[ski/lib.rs] Got ResponseParts: status={}, rid={:?}",
+                response_parts.status, response_parts.rid
+            );
 
             let mut builder =
                 hyper::Response::builder().status(StatusCode::from_u16(response_parts.status)?);
