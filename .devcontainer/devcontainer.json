@@ -8,8 +8,7 @@
     "ghcr.io/devcontainers/features/node:1": {
       "version": "lts"
     },
-    "ghcr.io/devcontainers/features/common-utils:2": {
-    },
+    "ghcr.io/devcontainers/features/common-utils:2": {},
     "ghcr.io/devcontainers/features/github-cli:1": {
       "version": "latest"
     }
@@ -25,6 +24,5 @@
       ]
     }
   },
-  "postCreateCommand": "bash .devcontainer/setup.sh",
   "forwardPorts": [3000]
 }
