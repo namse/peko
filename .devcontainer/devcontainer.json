@@ -7,7 +7,10 @@
     "ghcr.io/devcontainers/features/node:1": {
       "version": "lts"
     },
-    "ghcr.io/devcontainers/features/common-utils:2": {}
+    "ghcr.io/devcontainers/features/common-utils:2": {},
+    "ghcr.io/devcontainers/features/github-cli:1": {
+      "version": "latest"
+    }
   },
   "customizations": {
     "vscode": {
@@ -19,6 +22,11 @@
       ]
     }
   },
+  "mounts": [
+    "source=${localEnv:HOME}/.gitconfig,target=/home/fn0/.gitconfig,type=bind,consistency=cached",
+    "source=${localEnv:HOME}/.config/gh,target=/mnt/host-gh,type=bind,consistency=cached"
+  ],
+  "postCreateCommand": "bash .devcontainer/setup.sh",
   "forwardPorts": [3000],
-  "remoteUser": "vscode"
+  "remoteUser": "fn0"
 }
