@@ -6,7 +6,7 @@ services:
       context: .
       dockerfile: Dockerfile
     volumes:
-      - ../:/workspace:cached
+      - workspace-data:/workspace
     command: sleep infinity
     networks:
       - dev-network
@@ -35,6 +35,7 @@ services:
 volumes:
   libsql-data:
   minio-data:
+  workspace-data:
 
 networks:
   dev-network:

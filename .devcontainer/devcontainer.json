@@ -9,9 +9,6 @@
       "version": "lts"
     },
     "ghcr.io/devcontainers/features/common-utils:2": {
-      "username": "fn0",
-      "userUid": "1000",
-      "userGid": "1000"
     },
     "ghcr.io/devcontainers/features/github-cli:1": {
       "version": "latest"
@@ -23,15 +20,11 @@
         "tamasfe.even-better-toml",
         "dbaeumer.vscode-eslint",
         "esbenp.prettier-vscode",
-        "rust-lang.rust-analyzer"
+        "rust-lang.rust-analyzer",
+        "ms-azuretools.vscode-containers"
       ]
     }
   },
-  "mounts": [
-    "source=${localEnv:HOME}/.gitconfig,target=/home/fn0/.gitconfig,type=bind,consistency=cached",
-    "source=${localEnv:HOME}/.config/gh,target=/mnt/host-gh,type=bind,consistency=cached"
-  ],
   "postCreateCommand": "bash .devcontainer/setup.sh",
-  "forwardPorts": [3000],
-  "updateRemoteUserUID": true
+  "forwardPorts": [3000]
 }
