@@ -1,0 +1,37 @@
+services:
+  libsql:
+    image: ghcr.io/tursodatabase/libsql-server:latest
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./docker/data/libsql:/var/lib/sqld
+    environment:
+      - SQLD_NODE_NAME=primary
+    user: "0:0"
+
+  init-db:
+    image: curlimages/curl
+    depends_on:
+      - libsql
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "Waiting for LibSQL to be ready..."
+        until curl -s -f http://libsql:8080/health > /dev/null; do
+          sleep 1
+        done
+        echo "LibSQL is ready! Creating table with /v2/pipeline..."
+
+        curl -X POST http://libsql:8080/v2/pipeline \
+          -H "Content-Type: application/json" \
+          -d '{
+            "requests": [
+              {
+                "type": "execute",
+                "stmt": { 
+                  "sql": "CREATE TABLE IF NOT EXISTS docs (pk TEXT, sk TEXT, data BLOB, PRIMARY KEY (pk, sk)) WITHOUT ROWID" 
+                }
+              },
+              { "type": "close" }
+            ]
+          }'

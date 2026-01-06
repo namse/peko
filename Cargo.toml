@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["adapt-cache", "doc-db"]
+members = ["adapt-cache", "doc-db", "forte/db"]
 
 [workspace.dependencies]
 anyhow = "1"
