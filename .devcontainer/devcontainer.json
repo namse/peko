@@ -3,7 +3,7 @@
   "remoteUser": "vscode",
   "dockerComposeFile": "docker-compose.yml",
   "service": "app",
-  "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
+  "workspaceFolder": "/workspaces/fn0",
   "features": {
     "ghcr.io/devcontainers/features/node:1": {
       "version": "lts"
@@ -24,6 +24,7 @@
       ]
     }
   },
+  "postCreateCommand": "sudo chown -R $(whoami) /workspaces/fn0",
   "forwardPorts": [
     3000
   ]
