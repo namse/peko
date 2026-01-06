@@ -1,6 +1,6 @@
 {
   "name": "Forte Dev Environment",
-  "remoteUser": "fn0",
+  "remoteUser": "vscode",
   "dockerComposeFile": "docker-compose.yml",
   "service": "app",
   "workspaceFolder": "/workspace",
