@@ -5,8 +5,6 @@ services:
     build: 
       context: .
       dockerfile: Dockerfile
-    volumes:
-      - workspace-data:/workspace
     command: sleep infinity
     networks:
       - dev-network
