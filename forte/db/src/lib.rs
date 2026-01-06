@@ -4,7 +4,13 @@ use anyhow::Result;
 use turso::TursoDatabase;
 use wstd::http::body::Bytes;
 
-pub fn turso(url: &str, auth_token: &str) -> Result<Database> {
+/// Create a Turso database instance.
+/// # Environment Variables
+/// - `TURSO_URL`: The URL of the Turso database.
+/// - `TURSO_AUTH_TOKEN`: The authentication token for the Turso database.
+pub fn turso() -> Result<Database> {
+    let url = std::env::var("TURSO_URL").map_err(|_| anyhow::anyhow!("TURSO_URL env var not set"))?;
+    let auth_token = std::env::var("TURSO_AUTH_TOKEN").map_err(|_| anyhow::anyhow!("TURSO_AUTH_TOKEN env var not set"))?;
     Ok(Database {
         inner: DatabaseInner::Turso(TursoDatabase::new(url, auth_token)?),
     })

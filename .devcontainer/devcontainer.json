@@ -1,5 +1,6 @@
 {
   "name": "Forte Dev Environment",
+  "remoteUser": "fn0",
   "dockerComposeFile": "docker-compose.yml",
   "service": "app",
   "workspaceFolder": "/workspace",
@@ -7,7 +8,11 @@
     "ghcr.io/devcontainers/features/node:1": {
       "version": "lts"
     },
-    "ghcr.io/devcontainers/features/common-utils:2": {},
+    "ghcr.io/devcontainers/features/common-utils:2": {
+      "username": "fn0",
+      "userUid": "1000",
+      "userGid": "1000"
+    },
     "ghcr.io/devcontainers/features/github-cli:1": {
       "version": "latest"
     }
@@ -28,5 +33,5 @@
   ],
   "postCreateCommand": "bash .devcontainer/setup.sh",
   "forwardPorts": [3000],
-  "remoteUser": "fn0"
+  "updateRemoteUserUID": true
 }

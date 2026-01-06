@@ -191,6 +191,15 @@ fn main() {
     generate_routes();
 }
 
+fn write_if_changed(path: &Path, content: &str) {
+    if let Ok(existing) = fs::read_to_string(path) {
+        if existing == content {
+            return;
+        }
+    }
+    fs::write(path, content).unwrap();
+}
+
 fn generate_routes() {
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
     let pages_dir = Path::new(&manifest_dir).join("src/pages");
@@ -236,7 +245,7 @@ fn generate_routes() {
     output.push_str("        .unwrap())\n");
     output.push_str("}\n");
 
-    fs::write(&output_path, output).unwrap();
+    write_if_changed(&output_path, &output);
 }
 "##
 }

@@ -6,10 +6,19 @@ fn main() {
     if env::var("INSIDE_BUILD_SCRIPT_ANALYSIS").is_ok() {
         return;
     }
-    genearte_route();
+    generate_route();
 }
 
-fn genearte_route() {
+fn write_if_changed(path: &Path, content: &str) {
+    if let Ok(existing) = fs::read_to_string(path) {
+        if existing == content {
+            return;
+        }
+    }
+    fs::write(path, content).unwrap();
+}
+
+fn generate_route() {
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
     let src_path = Path::new(&manifest_dir).join("src").join("pages");
 
@@ -58,7 +67,7 @@ fn genearte_route() {
     output.push_str("        .unwrap())\n");
     output.push_str("}\n");
 
-    fs::write(&dest_path, output).unwrap();
+    write_if_changed(&dest_path, &output);
 }
 
 struct RouteInfo {
@@ -151,8 +160,15 @@ fn generate_route_block(route: &RouteInfo) -> String {
         }
     }
 
-    block.push_str(&format!("        println!(\"Calling {}::handler\");\n", route.mod_name));
-    block.push_str(&format!("        match {}::handler({}).await {{\n", route.mod_name, args.join(", ")));
+    block.push_str(&format!(
+        "        println!(\"Calling {}::handler\");\n",
+        route.mod_name
+    ));
+    block.push_str(&format!(
+        "        match {}::handler({}).await {{\n",
+        route.mod_name,
+        args.join(", ")
+    ));
     block.push_str("            Ok(props) => {\n");
     block.push_str("                println!(\"Handler succeeded, converting to stream\");\n");
     block.push_str("                let stream = forte_json::to_stream(&props);\n");
@@ -160,7 +176,10 @@ fn generate_route_block(route: &RouteInfo) -> String {
     block.push_str("                return Ok(Response::new(Body::from_stream(stream)));\n");
     block.push_str("            }\n");
     block.push_str("            Err(e) => {\n");
-    block.push_str(&format!("                eprintln!(\"{}::handler failed: {{:?}}\", e);\n", route.mod_name));
+    block.push_str(&format!(
+        "                eprintln!(\"{}::handler failed: {{:?}}\", e);\n",
+        route.mod_name
+    ));
     block.push_str("                return Ok(Response::builder()\n");
     block.push_str("                    .status(StatusCode::INTERNAL_SERVER_ERROR)\n");
     block.push_str("                    .body(Body::from(format!(\"Handler error: {:?}\", e)))\n");

@@ -10,10 +10,10 @@ pub(crate) struct TursoDatabase {
 }
 
 impl TursoDatabase {
-    pub(crate) fn new(url: &str, auth_token: &str) -> Result<Self> {
+    pub(crate) fn new(url: String, auth_token: String) -> Result<Self> {
         let http_url = {
             let url =
-                Uri::from_str(url).map_err(|e| anyhow::anyhow!("Failed to parse URI: {}", e))?;
+                Uri::from_str(&url).map_err(|e| anyhow::anyhow!("Failed to parse URI: {}", e))?;
             let mut parts = url.into_parts();
             parts.scheme = Some("https".parse().unwrap());
             parts.path_and_query = Some("/v2/pipeline".parse().unwrap());
@@ -23,7 +23,7 @@ impl TursoDatabase {
         Ok(Self {
             http_url,
             client: Client::new(),
-            auth_token: auth_token.to_string(),
+            auth_token,
         })
     }
     pub(crate) async fn get(&self, pk: &str, sk: &str) -> Result<Option<Bytes>> {
