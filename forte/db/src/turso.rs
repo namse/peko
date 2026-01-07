@@ -1,7 +1,7 @@
 use crate::BatchOp;
 use anyhow::{Result, bail};
 use libsql_hrana::proto::*;
-use std::str::FromStr;
+use std::{str::FromStr, sync::Arc};
 use wstd::http::{Client, HeaderValue, Request, Uri, body::Bytes};
 
 pub(crate) struct TursoDatabase {
@@ -11,27 +11,24 @@ pub(crate) struct TursoDatabase {
 }
 
 impl TursoDatabase {
-    pub(crate) fn new(url: String, auth_token: String) -> Result<Self> {
-        let http_url = {
-            let url =
-                Uri::from_str(&url).map_err(|e| anyhow::anyhow!("Failed to parse URI: {}", e))?;
-            let mut parts = url.into_parts();
-            // Convert libsql: scheme to https, preserve http for local development
-            match parts.scheme.as_ref().map(|s| s.as_str()) {
-                Some("libsql") | None => {
-                    parts.scheme = Some("https".parse().unwrap());
-                }
-                _ => {} // Keep http or other schemes as-is
+    pub(crate) fn new(url: String, auth_token: String) -> Self {
+        let url = Uri::from_str(&url).expect("Failed to parse URI");
+        let mut parts = url.into_parts();
+        // Convert libsql: scheme to https, preserve http for local development
+        match parts.scheme.as_ref().map(|s| s.as_str()) {
+            Some("libsql") | None => {
+                parts.scheme = Some("https".parse().unwrap());
             }
-            parts.path_and_query = Some("/v2/pipeline".parse().unwrap());
-            Uri::from_parts(parts)?
-        };
+            _ => {} // Keep http or other schemes as-is
+        }
+        parts.path_and_query = Some("/v2/pipeline".parse().unwrap());
+        let http_url = Uri::from_parts(parts).expect("Failed to assemble URI");
 
-        Ok(Self {
+        Self {
             http_url,
             client: Client::new(),
             auth_token,
-        })
+        }
     }
     async fn execute_pipeline(&self, requests: Vec<StreamRequest>) -> Result<PipelineRespBody> {
         self.execute_pipeline_with_baton(None, requests).await
@@ -260,35 +257,32 @@ impl TursoDatabase {
         Ok(())
     }
 
-    pub(crate) async fn query(
+    pub(crate) async fn query<S1: AsRef<str>, S2: AsRef<str>>(
         &self,
-        pk: &str,
-        after_sk: Option<&str>,
+        pk: S1,
+        after_sk: Option<S2>,
         limit: u32,
     ) -> Result<Vec<(String, Bytes)>> {
+        let pk: Arc<str> = pk.as_ref().to_string().into();
+        let after_sk: Option<Arc<str>> = after_sk.map(|s| s.as_ref().to_string().into());
+
         for retry in 0..2 {
-            let (sql, args) = match after_sk {
-                None => (
-                    "SELECT sk, data FROM docs WHERE pk = ? ORDER BY sk LIMIT ?".to_string(),
+            let (sql, args) = match after_sk.clone() {
+                Some(sk) => (
+                    "SELECT sk, data FROM docs WHERE pk = ? AND sk > ? ORDER BY sk LIMIT ?"
+                        .to_string(),
                     vec![
-                        Value::Text {
-                            value: pk.to_string().into(),
-                        },
+                        Value::Text { value: pk.clone() },
+                        Value::Text { value: sk },
                         Value::Integer {
                             value: limit as i64,
                         },
                     ],
                 ),
-                Some(sk) => (
-                    "SELECT sk, data FROM docs WHERE pk = ? AND sk > ? ORDER BY sk LIMIT ?"
-                        .to_string(),
+                None => (
+                    "SELECT sk, data FROM docs WHERE pk = ? ORDER BY sk LIMIT ?".to_string(),
                     vec![
-                        Value::Text {
-                            value: pk.to_string().into(),
-                        },
-                        Value::Text {
-                            value: sk.to_string().into(),
-                        },
+                        Value::Text { value: pk.clone() },
                         Value::Integer {
                             value: limit as i64,
                         },

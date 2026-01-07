@@ -21,21 +21,19 @@ pub enum BatchOp<'a> {
 /// # Environment Variables
 /// - `TURSO_URL`: The URL of the Turso database.
 /// - `TURSO_AUTH_TOKEN`: The authentication token for the Turso database.
-pub fn turso() -> Result<Database> {
-    let url =
-        std::env::var("TURSO_URL").map_err(|_| anyhow::anyhow!("TURSO_URL env var not set"))?;
-    let auth_token = std::env::var("TURSO_AUTH_TOKEN")
-        .map_err(|_| anyhow::anyhow!("TURSO_AUTH_TOKEN env var not set"))?;
+pub fn turso() -> Database {
+    let url = std::env::var("TURSO_URL").expect("TURSO_URL env var not set");
+    let auth_token = std::env::var("TURSO_AUTH_TOKEN").expect("TURSO_AUTH_TOKEN env var not set");
     turso_with_config(url, auth_token)
 }
 
 /// Create a Turso database instance with explicit configuration.
 /// - `url`: The URL of the Turso database (supports http, https, libsql schemes).
 /// - `auth_token`: The authentication token. Pass empty string for no authentication.
-pub fn turso_with_config(url: String, auth_token: String) -> Result<Database> {
-    Ok(Database {
-        inner: DatabaseInner::Turso(TursoDatabase::new(url, auth_token)?),
-    })
+pub fn turso_with_config(url: String, auth_token: String) -> Database {
+    Database {
+        inner: DatabaseInner::Turso(TursoDatabase::new(url, auth_token)),
+    }
 }
 
 pub struct Database {
@@ -61,10 +59,10 @@ impl Database {
         }
     }
 
-    pub async fn query(
+    pub async fn query<S1: AsRef<str>, S2: AsRef<str>>(
         &self,
-        pk: &str,
-        after_sk: Option<&str>,
+        pk: S1,
+        after_sk: Option<S2>,
         limit: u32,
     ) -> Result<Vec<(String, Bytes)>> {
         match &self.inner {

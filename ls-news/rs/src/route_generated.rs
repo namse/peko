@@ -4,14 +4,28 @@ use forte_sdk::anyhow::Result;
 use forte_sdk::wstd::http::{Error, Request, Response, StatusCode, body::Body, HeaderMap};
 use forte_sdk::http::header::COOKIE;
 use forte_sdk::*;
+use std::collections::HashMap;
 #[forte_sdk::wstd::http_server]
 pub async fn main(request: Request<Body>) -> Result<Response<Body>, Error> {
     let (parts, _body) = request.into_parts();
     let headers = parts.headers;
     let path = parts.uri.path();
+    let query = parts.uri.query().unwrap_or("");
     let cookie_jar = make_cookie_jar(&headers);
+    let query_params: HashMap<String, String> = query
+        .split('&')
+        .filter(|s| !s.is_empty())
+        .filter_map(|pair| {
+            let mut parts = pair.splitn(2, '=');
+            let key = parts.next()?;
+            let value = parts.next().unwrap_or("");
+            Some((key.to_string(), value.to_string()))
+        })
+        .collect();
     if path == "/" {
-        match pages_index::handler(headers, cookie_jar).await {
+        let after: Option<String> = query_params.get("after").cloned();
+        let search_params = pages_index::SearchParams { after };
+        match pages_index::handler(headers, cookie_jar, search_params).await {
             Ok(props) => {
                 let stream = forte_json::to_stream(&props);
                 Ok(Response::new(Body::from_stream(stream)))

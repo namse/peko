@@ -856,6 +856,7 @@ dependencies = [
  "iana-time-zone",
  "js-sys",
  "num-traits",
+ "serde",
  "wasm-bindgen",
  "windows-link",
 ]
@@ -1259,13 +1260,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "forte-macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "forte-sdk"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "cookie",
  "forte-db",
  "forte-json",
+ "forte-macros",
  "hex",
  "hmac",
  "http 1.4.0",
