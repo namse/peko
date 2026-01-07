@@ -1,14 +1,24 @@
 use anyhow::Result;
+use cookie::CookieJar;
+use forte_sdk::*;
 use http::HeaderMap;
 use serde::Serialize;
+
+pub struct SearchParams {
+    pub after: Option<String>,
+}
 
 #[derive(Serialize)]
 pub enum Props {
     Ok { message: String },
 }
 
-pub async fn handler(headers: HeaderMap) -> Result<Props> {
-    let is_admin = crate::common::auth::is_admin(&headers);
+pub async fn handler(
+    headers: HeaderMap,
+    jar: CookieJar,
+    search_params: SearchParams,
+) -> Result<Props> {
+    let is_admin = crate::common::auth::is_admin(&jar);
 
     Ok(Props::Ok {
         message: "Hello from Forte!".to_string(),

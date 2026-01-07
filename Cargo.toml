@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["adapt-cache", "doc-db", "forte/db"]
+members = ["adapt-cache", "doc-db", "forte/db", "forte/rs-sdk"]
 exclude = ["ls-news/rs", "forte/forte", "wasmtime", "ski"]
 
 [workspace.dependencies]
