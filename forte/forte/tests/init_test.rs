@@ -14,15 +14,19 @@ fn test_init_creates_project_structure() {
     let project_dir = temp.path().join("my-app");
 
     assert!(project_dir.join("Forte.toml").exists());
+    assert!(project_dir.join(".gitignore").exists());
+    assert!(project_dir.join("Cargo.toml").exists());
 
+    assert!(project_dir.join("rs/.gitignore").exists());
     assert!(project_dir.join("rs/Cargo.toml").exists());
     assert!(project_dir.join("rs/.cargo/config.toml").exists());
     assert!(project_dir.join("rs/src/lib.rs").exists());
     assert!(project_dir.join("rs/src/pages/index/mod.rs").exists());
 
+    assert!(project_dir.join("fe/.gitignore").exists());
     assert!(project_dir.join("fe/package.json").exists());
     assert!(project_dir.join("fe/tsconfig.json").exists());
-    assert!(project_dir.join("fe/rolldown.config.ts").exists());
+    assert!(project_dir.join("fe/vite.config.ts").exists());
     assert!(project_dir.join("fe/src/server.tsx").exists());
     assert!(project_dir.join("fe/src/client.tsx").exists());
     assert!(project_dir.join("fe/src/pages/index/page.tsx").exists());

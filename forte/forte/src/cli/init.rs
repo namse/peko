@@ -16,7 +16,13 @@ pub fn run(name: &str) -> Result<()> {
     fs::create_dir_all(project_dir.join("fe/public"))?;
 
     fs::write(project_dir.join("Forte.toml"), generate_forte_toml(name))?;
+    fs::write(project_dir.join(".gitignore"), generate_root_gitignore())?;
+    fs::write(
+        project_dir.join("Cargo.toml"),
+        generate_workspace_cargo_toml(),
+    )?;
 
+    fs::write(project_dir.join("rs/.gitignore"), generate_rs_gitignore())?;
     fs::write(project_dir.join("rs/Cargo.toml"), generate_cargo_toml())?;
 
     fs::write(
@@ -33,6 +39,7 @@ pub fn run(name: &str) -> Result<()> {
 
     fs::write(project_dir.join("rs/build.rs"), generate_build_rs())?;
 
+    fs::write(project_dir.join("fe/.gitignore"), generate_fe_gitignore())?;
     fs::write(
         project_dir.join("fe/package.json"),
         generate_package_json(name),
@@ -121,6 +128,25 @@ fn generate_forte_toml(name: &str) -> String {
 name = "{name}"
 "#
     )
+}
+
+fn generate_root_gitignore() -> &'static str {
+    "/target\n"
+}
+
+fn generate_workspace_cargo_toml() -> &'static str {
+    r#"[workspace]
+resolver = "3"
+members = ["rs"]
+"#
+}
+
+fn generate_rs_gitignore() -> &'static str {
+    "/target\n"
+}
+
+fn generate_fe_gitignore() -> &'static str {
+    "/node_modules\n"
 }
 
 fn generate_cargo_toml() -> String {
