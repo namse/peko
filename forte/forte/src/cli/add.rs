@@ -74,6 +74,7 @@ fn generate_backend_page(page_path: &str) -> String {
 
     if params.is_empty() {
         r#"use anyhow::Result;
+use cookie::CookieJar;
 use http::HeaderMap;
 use serde::Serialize;
 
@@ -82,7 +83,7 @@ pub enum Props {
     Ok { message: String },
 }
 
-pub async fn handler(_headers: HeaderMap) -> Result<Props> {
+pub async fn handler(_headers: HeaderMap, _jar: CookieJar) -> Result<Props> {
     Ok(Props::Ok {
         message: "Hello from Forte!".to_string(),
     })
@@ -98,6 +99,7 @@ pub async fn handler(_headers: HeaderMap) -> Result<Props> {
 
         format!(
             r#"use anyhow::Result;
+use cookie::CookieJar;
 use http::HeaderMap;
 use serde::{{Deserialize, Serialize}};
 
@@ -111,7 +113,7 @@ pub enum Props {{
     Ok {{ message: String }},
 }}
 
-pub async fn handler(_headers: HeaderMap, params: Params) -> Result<Props> {{
+pub async fn handler(_headers: HeaderMap, _jar: CookieJar, params: Params) -> Result<Props> {{
     Ok(Props::Ok {{
         message: format!("Hello from Forte!"),
     }})

@@ -166,6 +166,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 anyhow = "1"
+cookie = "0.18"
 serde = {{ version = "1", features = ["derive"] }}
 serde_json = "1"
 http = "1"
@@ -192,6 +193,7 @@ fn generate_lib_rs() -> &'static str {
 
 fn generate_index_mod_rs() -> &'static str {
     r#"use anyhow::Result;
+use cookie::CookieJar;
 use http::HeaderMap;
 use serde::Serialize;
 
@@ -200,7 +202,7 @@ pub enum Props {
     Ok { message: String },
 }
 
-pub async fn handler(_headers: HeaderMap) -> Result<Props> {
+pub async fn handler(_headers: HeaderMap, _jar: CookieJar) -> Result<Props> {
     Ok(Props::Ok {
         message: "Hello from Forte!".to_string(),
     })
@@ -242,16 +244,34 @@ fn generate_routes() {
     }
 
     output.push_str("use anyhow::Result;\n");
+    output.push_str("use http::header::COOKIE;\n");
+    output.push_str("use http::HeaderMap;\n");
     output.push_str("use wstd::http::{Error, Request, Response, StatusCode, body::Body};\n\n");
+
+    output.push_str("fn make_cookie_jar(headers: &HeaderMap) -> cookie::CookieJar {\n");
+    output.push_str("    let mut jar = cookie::CookieJar::new();\n");
+    output.push_str("    let Some(cookie) = headers.get(COOKIE) else {\n");
+    output.push_str("        return jar;\n");
+    output.push_str("    };\n");
+    output.push_str("    let Ok(cookie_str) = cookie.to_str() else {\n");
+    output.push_str("        return jar;\n");
+    output.push_str("    };\n\n");
+    output.push_str("    for cookie in cookie::Cookie::split_parse_encoded(cookie_str) {\n");
+    output.push_str("        let Ok(cookie) = cookie else { continue };\n");
+    output.push_str("        jar.add_original(cookie.into_owned());\n");
+    output.push_str("    }\n\n");
+    output.push_str("    jar\n");
+    output.push_str("}\n\n");
 
     output.push_str("#[wstd::http_server]\n");
     output.push_str("pub async fn main(request: Request<Body>) -> Result<Response<Body>, Error> {\n");
     output.push_str("    let (parts, _body) = request.into_parts();\n");
     output.push_str("    let headers = parts.headers;\n");
+    output.push_str("    let jar = make_cookie_jar(&headers);\n");
     output.push_str("    let path = parts.uri.path();\n\n");
 
     output.push_str("    if path == \"/\" {\n");
-    output.push_str("        match pages_index::handler(headers).await {\n");
+    output.push_str("        match pages_index::handler(headers, jar).await {\n");
     output.push_str("            Ok(props) => {\n");
     output.push_str("                let stream = forte_json::to_stream(&props);\n");
     output.push_str("                return Ok(Response::new(Body::from_stream(stream)));\n");
