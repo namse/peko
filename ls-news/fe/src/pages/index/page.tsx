@@ -1,26 +1,20 @@
-import type { Props, Row } from "./.props";
+import type { Props } from "./.props";
 import { Layout } from "@/components/Layout";
 import { NewsItem } from "@/components/NewsItem";
 import { NewsPagination } from "@/components/NewsPagination";
 
-function getDomain(url: string): string {
-  try {
-    return new URL(url).hostname;
-  } catch {
-    return url;
-  }
-}
-
 export default function IndexPage(props: Props) {
-  if (props.t !== "Ok") {
+  if (props.t === "DbErr") {
     return (
       <Layout>
-        <div className="text-center text-red-500">Error: {props.message}</div>
+        <div className="text-center text-red-500">
+          Db Error: {props.message}
+        </div>
       </Layout>
     );
   }
 
-  const displayedItems = props.rows.map((row: Row) => ({
+  const displayedItems = props.rows.map((row) => ({
     id: row.post.id,
     title: row.post.title,
     url: row.post.url,
@@ -44,4 +38,12 @@ export default function IndexPage(props: Props) {
       )}
     </Layout>
   );
+}
+
+function getDomain(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return url;
+  }
 }

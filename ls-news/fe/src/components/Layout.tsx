@@ -1,11 +1,7 @@
 import { NewsHeader } from "./NewsHeader";
 import { Footer } from "./Footer";
 
-type LayoutProps = {
-  children: React.ReactNode;
-};
-
-export function Layout({ children }: LayoutProps) {
+export function Layout({ children }: { children: React.ReactNode }) {
   return (
     <>
       <NewsHeader />

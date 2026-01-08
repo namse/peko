@@ -1,15 +1,15 @@
 import { Link } from "@/components/ui/link";
 
-type NewsItemProps = {
+export function NewsItem({
+  item,
+}: {
   item: {
     id: string;
     title: string;
     url: string;
     domain: string;
   };
-};
-
-export function NewsItem({ item }: NewsItemProps) {
+}) {
   return (
     <div className="py-3 border-b">
       <div className="flex items-baseline gap-2 flex-wrap">

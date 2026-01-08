@@ -1,11 +1,12 @@
 import { Link } from "@/components/ui/link";
 
-type NewsPaginationProps = {
+export function NewsPagination({
+  lastKey,
+  hasMore,
+}: {
   lastKey: string;
   hasMore: boolean;
-};
-
-export function NewsPagination({ lastKey, hasMore }: NewsPaginationProps) {
+}) {
   return (
     <div className="py-6 border-b">
       {hasMore ? (
