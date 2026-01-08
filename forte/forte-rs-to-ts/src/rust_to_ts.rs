@@ -4,27 +4,10 @@ use rustc_middle::ty::{AdtDef, GenericArgsRef, Ty, TyCtxt};
 use rustc_span::def_id::DefId;
 use std::collections::HashSet;
 
-pub fn snake_to_camel(s: &str) -> String {
-    let mut result = String::new();
-    let mut capitalize_next = false;
-
-    for ch in s.chars() {
-        if ch == '_' {
-            capitalize_next = true;
-        } else if capitalize_next {
-            result.push(ch.to_ascii_uppercase());
-            capitalize_next = false;
-        } else {
-            result.push(ch);
-        }
-    }
-
-    result
-}
-
 pub struct TypeConverter<'tcx> {
     tcx: TyCtxt<'tcx>,
     visited: HashSet<DefId>,
+    processed: HashSet<DefId>,
     pub definitions: Vec<TsDefinition>,
 }
 
@@ -33,6 +16,7 @@ impl<'tcx> TypeConverter<'tcx> {
         Self {
             tcx,
             visited: HashSet::new(),
+            processed: HashSet::new(),
             definitions: Vec::new(),
         }
     }
@@ -60,6 +44,8 @@ impl<'tcx> TypeConverter<'tcx> {
             rustc_middle::ty::TyKind::Adt(adt_def, substs) => {
                 if self.is_std_type(adt_def, "String") {
                     TsType::Primitive("string".to_string())
+                } else if self.is_chrono_type(adt_def) {
+                    TsType::Date
                 } else if self.is_std_type(adt_def, "Option") {
                     let inner_ty = substs[0].expect_ty();
                     TsType::Undefined(Box::new(self.convert_type(inner_ty, context)))
@@ -97,6 +83,13 @@ impl<'tcx> TypeConverter<'tcx> {
         }
     }
 
+    fn is_chrono_type(&self, adt_def: &AdtDef<'tcx>) -> bool {
+        let def_path = self.tcx.def_path_str(adt_def.did());
+        // Simple check for chrono::DateTime, handling potential re-exports loosely or strictly
+        // chrono::datetime::DateTime is the usual canonical path
+        def_path.contains("chrono") && def_path.ends_with("DateTime")
+    }
+
     fn is_std_type(&self, adt_def: &AdtDef<'tcx>, name: &str) -> bool {
         let def_path = self.tcx.def_path_str(adt_def.did());
         def_path == format!("std::string::{}", name)
@@ -128,8 +121,12 @@ impl<'tcx> TypeConverter<'tcx> {
         let def_id = adt_def.did();
         let type_name = self.tcx.def_path_str(def_id);
 
+        if self.processed.contains(&def_id) {
+            return TsType::Reference(type_name);
+        }
+
         if !self.visited.insert(def_id) {
-            return TsType::Reference(type_name.clone());
+            return TsType::Reference(type_name);
         }
 
         let ts_type = if adt_def.is_struct() {
@@ -142,7 +139,16 @@ impl<'tcx> TypeConverter<'tcx> {
         };
 
         self.visited.remove(&def_id);
-        ts_type
+        self.processed.insert(def_id);
+
+        self.definitions.push(TsDefinition {
+            full_path: type_name.clone(),
+            namespace: vec![],
+            type_name: type_name.clone(),
+            ty: ts_type,
+        });
+
+        TsType::Reference(type_name)
     }
 
     fn convert_struct(
@@ -151,7 +157,7 @@ impl<'tcx> TypeConverter<'tcx> {
         substs: GenericArgsRef<'tcx>,
         context: &str,
     ) -> TsType {
-        let type_name = self.tcx.def_path_str(def_id);
+        let _type_name = self.tcx.def_path_str(def_id);
         let fields: Vec<TsField> = self
             .tcx
             .adt_def(def_id)
@@ -182,14 +188,7 @@ impl<'tcx> TypeConverter<'tcx> {
             })
             .collect();
 
-        let ts_type = TsType::Object(fields.clone());
-        self.definitions.push(TsDefinition {
-            full_path: type_name.clone(),
-            namespace: vec![],
-            type_name: type_name.clone(),
-            ty: ts_type.clone(),
-        });
-        ts_type
+        TsType::Object(fields)
     }
 
     fn convert_enum(
@@ -205,7 +204,7 @@ impl<'tcx> TypeConverter<'tcx> {
             let variant_ty = if variant.fields.is_empty() {
                 TsType::Object(vec![TsField {
                     name: "t".to_string(),
-                    ty: TsType::Primitive(format!("\"{}\"", variant.name)),
+                    ty: TsType::Literal(format!("\"{}\"", variant.name)),
                     is_optional: false,
                 }])
             } else {
@@ -247,27 +246,68 @@ impl<'tcx> TypeConverter<'tcx> {
 
                 let tag_field = TsField {
                     name: "t".to_string(),
-                    ty: TsType::Primitive(format!("\"{}\"", variant.name)),
+                    ty: TsType::Literal(format!("\"{}\"", variant.name)),
                     is_optional: false,
                 };
 
-                let value_field = TsField {
-                    name: "v".to_string(),
-                    ty: if is_tuple_variant && fields.len() == 1 {
-                        fields[0].ty.clone()
-                    } else if is_tuple_variant {
-                        TsType::Tuple(fields.into_iter().map(|f| f.ty).collect())
-                    } else {
-                        TsType::Object(fields)
-                    },
-                    is_optional: false,
-                };
+                // For Zod discriminated union, we need one flat object.
+                // If it was a tuple variant in Rust, we usually map it to a property like "v" or spread it.
+                // The prompt example shows: Ok { posts: ... } -> posts field directly.
+                // So if it's struct-like variant, fields are spread.
+                // If it's tuple-like variant, we usually wrap in "v" or similar.
+                // The previous code did: Tag + (Tuple | Object).
+                // But Zod discriminated union needs a SINGLE object with the tag inside.
+                // So we must flatten.
 
-                TsType::Object(vec![tag_field, value_field])
+                let mut flattened_fields = vec![tag_field];
+
+                if is_tuple_variant {
+                    // Tuple variant: e.g. Start(i32) -> { t: "Start", v: number } or { t: "Start", _0: number }
+                    // Existing code logic was:
+                    // value_field = { name: "v", ty: ... }
+                    // We can stick to that convention: use "v" for the content of tuple variant.
+
+                    if fields.len() == 1 {
+                        flattened_fields.push(TsField {
+                            name: "v".to_string(),
+                            ty: fields[0].ty.clone(),
+                            is_optional: fields[0].is_optional,
+                        });
+                    } else if !fields.is_empty() {
+                        flattened_fields.push(TsField {
+                            name: "v".to_string(),
+                            ty: TsType::Tuple(fields.into_iter().map(|f| f.ty).collect()),
+                            is_optional: false,
+                        });
+                    }
+                } else {
+                    // Struct variant: spread fields
+                    flattened_fields.extend(fields);
+                }
+
+                TsType::Object(flattened_fields)
             };
             variants.push(variant_ty);
         }
 
-        TsType::Union(variants)
+        TsType::DiscriminatedUnion("t".to_string(), variants)
     }
+}
+
+fn snake_to_camel(s: &str) -> String {
+    let mut result = String::new();
+    let mut capitalize_next = false;
+
+    for ch in s.chars() {
+        if ch == '_' {
+            capitalize_next = true;
+        } else if capitalize_next {
+            result.push(ch.to_ascii_uppercase());
+            capitalize_next = false;
+        } else {
+            result.push(ch);
+        }
+    }
+
+    result
 }

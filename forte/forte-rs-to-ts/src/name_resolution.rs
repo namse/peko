@@ -31,6 +31,7 @@ pub fn strip_route_prefix(full_path: &str) -> Vec<String> {
 }
 
 pub fn find_shortest_unique_namespaces(paths: &[Vec<String>]) -> Vec<ResolvedName> {
+    // (Existing logic unchanged)
     let no_collision = paths.len() == 1;
     if no_collision {
         let type_name = paths[0].last().unwrap().clone();
@@ -144,8 +145,8 @@ pub fn apply_name_resolution_to_type(ty: &mut TsType, name_map: &HashMap<String,
                 apply_name_resolution_to_type(t, name_map);
             }
         }
-        TsType::Union(types) => {
-            for t in types {
+        TsType::DiscriminatedUnion(_, variants) => {
+            for t in variants {
                 apply_name_resolution_to_type(t, name_map);
             }
         }
@@ -158,5 +159,7 @@ pub fn apply_name_resolution_to_type(ty: &mut TsType, name_map: &HashMap<String,
             apply_name_resolution_to_type(inner, name_map);
         }
         TsType::Primitive(_) => {}
+        TsType::Date => {}
+        TsType::Literal(_) => {}
     }
 }

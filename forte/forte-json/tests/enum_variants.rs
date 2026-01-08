@@ -24,7 +24,7 @@ enum SimpleEnum {
 async fn test_unit_variant() {
     let value = SimpleEnum::Unit;
     let json = stream_to_string(&value).await;
-    assert_eq!(json, r#"{"t":"Unit","v":null}"#);
+    assert_eq!(json, r#"{"t":"Unit"}"#);
 }
 
 #[tokio::test]
@@ -48,7 +48,7 @@ async fn test_struct_variant() {
         y: "world".to_string(),
     };
     let json = stream_to_string(&value).await;
-    assert_eq!(json, r#"{"t":"Struct","v":{"x":10,"y":"world"}}"#);
+    assert_eq!(json, r#"{"t":"Struct","x":10,"y":"world"}"#);
 }
 
 #[tokio::test]
@@ -69,5 +69,5 @@ async fn test_nested_enum() {
 async fn test_vec_of_enum() {
     let values = vec![SimpleEnum::Unit, SimpleEnum::Newtype(1)];
     let json = stream_to_string(&values).await;
-    assert_eq!(json, r#"[{"t":"Unit","v":null},{"t":"Newtype","v":1}]"#);
+    assert_eq!(json, r#"[{"t":"Unit"},{"t":"Newtype","v":1}]"#);
 }

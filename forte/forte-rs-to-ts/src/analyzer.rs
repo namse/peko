@@ -1,6 +1,6 @@
 use crate::name_resolution::{apply_name_resolution_to_type, resolve_type_names};
 use crate::rust_to_ts::TypeConverter;
-use crate::ts_codegen::{TsDefinition, TsType, format_definition, strip_undefined};
+use crate::ts_codegen::{TsDefinition, TsType, format_definition, to_zod};
 use rustc_driver::{Callbacks, Compilation};
 use rustc_hir::def::DefKind;
 use rustc_interface::interface::Compiler;
@@ -56,25 +56,7 @@ fn generate_ts_file_content(
 ) -> String {
     let mut file_content = String::new();
     file_content.push_str(&format!("// Auto-generated from {}\n\n", rust_source_path));
-
-    if let TsType::Object(fields) = ts_type {
-        file_content.push_str("export interface Props {\n");
-        for field in fields {
-            let optional_marker = if field.is_optional { "?" } else { "" };
-            let ty_str = if field.is_optional {
-                strip_undefined(&field.ty)
-            } else {
-                format!("{}", field.ty)
-            };
-            file_content.push_str(&format!(
-                "    {}{}: {};\n",
-                field.name, optional_marker, ty_str
-            ));
-        }
-        file_content.push_str("}\n");
-    } else {
-        file_content.push_str(&format!("export type Props = {};\n", ts_type));
-    }
+    file_content.push_str("import { z } from \"zod\";\n\n");
 
     let mut namespace_groups: HashMap<Vec<String>, Vec<&TsDefinition>> = HashMap::new();
     for def in definitions {
@@ -86,8 +68,8 @@ fn generate_ts_file_content(
 
     if let Some(top_level_defs) = namespace_groups.get(&vec![]) {
         for def in top_level_defs {
-            file_content.push('\n');
             file_content.push_str(&format_definition(def));
+            file_content.push_str("\n\n");
         }
     }
 
@@ -99,7 +81,6 @@ fn generate_ts_file_content(
     namespaces.sort();
 
     for namespace in namespaces {
-        file_content.push('\n');
         file_content.push_str(&format!("export namespace {} {{\n", namespace.join(".")));
 
         if let Some(defs) = namespace_groups.get(&namespace) {
@@ -108,17 +89,25 @@ fn generate_ts_file_content(
                 for line in def_str.lines() {
                     file_content.push_str(&format!("    {}\n", line));
                 }
+                file_content.push('\n');
             }
         }
 
-        file_content.push_str("}\n");
+        file_content.push_str("}\n\n");
     }
+
+    let props_zod = to_zod(ts_type);
+    file_content.push_str(&format!(
+        "export const PropsSchema = {};\n\nexport type Props = z.infer<typeof PropsSchema>;\n",
+        props_zod
+    ));
 
     file_content
 }
 
 impl Callbacks for Analyzer {
     fn after_analysis<'tcx>(&mut self, _compiler: &Compiler, tcx: TyCtxt<'tcx>) -> Compilation {
+        // ... (Existing traversal logic unchanged)
         let items = tcx.hir_crate_items(());
         let page_modules = Mutex::new(Vec::new());
         let _ = items.par_items(|item_id| {
@@ -262,8 +251,11 @@ impl Callbacks for Analyzer {
                 let mut converter = TypeConverter::new(tcx);
                 let props_ty = tcx.type_of(props_id).instantiate_identity();
                 let context = format!("{:?}", filename);
-                let ts_type = converter.convert_type(props_ty, &context);
 
+                // 1. 변환 수행 (이제 ts_type은 Reference("...Props") 형태일 것임)
+                let mut ts_type = converter.convert_type(props_ty, &context);
+
+                // 2. 이름 충돌 해결
                 let name_map = resolve_type_names(&converter.definitions);
 
                 for def in &mut converter.definitions {
@@ -277,8 +269,28 @@ impl Callbacks for Analyzer {
                     apply_name_resolution_to_type(&mut def.ty, &name_map);
                 }
 
+                apply_name_resolution_to_type(&mut ts_type, &name_map);
+
+                if let TsType::Reference(ref root_ref_string) = ts_type {
+                    let found_idx = converter.definitions.iter().position(|def| {
+                        let def_ref = if def.namespace.is_empty() {
+                            def.type_name.clone()
+                        } else {
+                            format!("{}.{}", def.namespace.join("."), def.type_name)
+                        };
+                        &def_ref == root_ref_string
+                    });
+
+                    if let Some(idx) = found_idx {
+                        let root_def = converter.definitions.remove(idx);
+                        ts_type = root_def.ty;
+                    }
+                }
+
                 let file_content =
                     generate_ts_file_content(&rust_source_path, &ts_type, &converter.definitions);
+
+                println!("self.ts_output_dir: {}", self.ts_output_dir);
 
                 let ts_output_path =
                     convert_rust_path_to_ts_path(&rust_source_path, &self.ts_output_dir);
@@ -298,7 +310,7 @@ impl Callbacks for Analyzer {
                 println!(
                     "Generated: {} -> {}",
                     rust_source_path,
-                    ts_output_path.display()
+                    ts_output_path.canonicalize().unwrap().display()
                 );
             } else {
                 let span = get_module_actual_span(tcx, def_id);

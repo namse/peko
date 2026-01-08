@@ -459,7 +459,6 @@ impl<'a> ser::SerializeStructVariant for Compound<'a> {
             unreachable!()
         };
         ser.write_bytes(b"}");
-        ser.write_bytes(b"}");
         Ok(())
     }
 }
@@ -878,7 +877,6 @@ impl<'a> ser::Serializer for &'a mut Serializer {
         self.write_bytes(b"{");
         self.write_bytes(b"\"t\":");
         self.write_string_value(variant);
-        self.write_bytes(b",\"v\":null");
         self.write_bytes(b"}");
         Ok(())
     }
@@ -982,10 +980,9 @@ impl<'a> ser::Serializer for &'a mut Serializer {
         self.write_bytes(b"{");
         self.write_bytes(b"\"t\":");
         self.write_string_value(variant);
-        self.write_bytes(b",\"v\":{");
         Ok(Compound::StructVariant {
             ser: self,
-            state: State::Empty,
+            state: State::Rest,
         })
     }
 }

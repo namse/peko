@@ -40,14 +40,14 @@ fn main() {
         run_compiler(
             &args[1..],
             &mut Analyzer {
-                ts_output_dir: "../fe/src/pages".to_string(),
+                ts_output_dir: "fe/src/pages".to_string(),
             },
         );
         return;
     }
     let target_dir = env::args()
         .nth(1)
-        .unwrap_or_else(|| "../forte-manual/rs".to_string());
+        .unwrap_or_else(|| "../../ls-news/rs".to_string());
 
     let current_exe = env::current_exe().expect("Failed to find current exe");
     println!("Running cargo check on: {target_dir}");
