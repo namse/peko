@@ -12,3 +12,4 @@ pub use serde_json;
 pub use sha2;
 pub use wstd;
 pub type DateTime = chrono::DateTime<chrono::Utc>;
+pub use futures;

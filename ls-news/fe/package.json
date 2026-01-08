@@ -6,15 +6,19 @@
     "build": "vite build && vite build --ssr src/server.tsx --outDir dist/ssr"
   },
   "dependencies": {
+    "clsx": "^2.1.1",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
+    "tailwind-merge": "^3.3.1",
     "zod": "^4.3.5"
   },
   "devDependencies": {
+    "@tailwindcss/vite": "^4.1.16",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.2",
     "express": "^5.2.1",
+    "tailwindcss": "^4.1.16",
     "typescript": "^5.9.3",
     "vite": "^7.3.0"
   }

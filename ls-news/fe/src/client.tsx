@@ -1,5 +1,6 @@
 import { hydrateRoot } from "react-dom/client";
 import { routes } from "./routes.generated";
+import "./styles/globals.css";
 
 function matchRoute(pathname: string): { route: typeof routes[0]; params: Record<string, string> } | null {
     for (const route of routes) {
@@ -28,11 +29,15 @@ function matchRoute(pathname: string): { route: typeof routes[0]; params: Record
 }
 
 async function hydrate() {
-    const props = (window as any).__FORTE_PROPS__;
+    const rawProps = (window as any).__FORTE_PROPS__;
     const matched = matchRoute(window.location.pathname);
 
     if (matched) {
-        const pageModule = await matched.route.component();
+        const [pageModule, schemaModule] = await Promise.all([
+            matched.route.component(),
+            matched.route.schema(),
+        ]);
+        const props = schemaModule.PropsSchema.parse(rawProps);
         const element = pageModule.default({ ...props, params: matched.params });
         hydrateRoot(document.getElementById("root")!, element);
     }

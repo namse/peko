@@ -3,6 +3,8 @@ name = "forte"
 version = "0.1.0"
 edition = "2024"
 
+[workspace]
+
 [dependencies]
 fn0 = { path = "../../fn0" }
 adapt-cache = { path = "../../adapt-cache" }

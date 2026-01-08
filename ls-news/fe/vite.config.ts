@@ -1,5 +1,7 @@
 import { defineConfig, Plugin } from "vite";
 import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
+import path from "path";
 
 function exitOnStdinClose(): Plugin {
   return {
@@ -14,7 +16,12 @@ function exitOnStdinClose(): Plugin {
 }
 
 export default defineConfig(({ isSsrBuild }) => ({
-  plugins: [react(), exitOnStdinClose()],
+  plugins: [react(), tailwindcss(), exitOnStdinClose()],
+  resolve: {
+    alias: {
+      "@": path.resolve(__dirname, "./src"),
+    },
+  },
   optimizeDeps: {
     include: ["react", "react-dom"],
   },

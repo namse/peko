@@ -206,6 +206,7 @@ dependencies = [
  "cookie",
  "forte-db",
  "forte-json",
+ "futures",
  "hex",
  "hmac",
  "http",

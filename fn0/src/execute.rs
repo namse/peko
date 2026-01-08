@@ -208,7 +208,7 @@ where
         pre.engine(),
         ClientState {
             table: ResourceTable::new(),
-            wasi: WasiCtx::builder().inherit_stdio().build(),
+            wasi: WasiCtx::builder().inherit_stdio().inherit_env().build(),
             http: WasiHttpCtx::new(),
             time_tracker: time_tracker.clone(),
             code_id: code_id.clone(),

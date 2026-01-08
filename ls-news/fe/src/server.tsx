@@ -33,7 +33,7 @@ function escapeJsonForScript(json: string): string {
 
 const isDev = import.meta.env?.DEV ?? false;
 
-export async function render(url: string, props: any): Promise<string> {
+export async function render(url: string, rawProps: any): Promise<string> {
     const urlObj = new URL(url, "http://localhost");
     const matched = matchRoute(urlObj.pathname);
 
@@ -41,8 +41,12 @@ export async function render(url: string, props: any): Promise<string> {
         return "Not Found";
     }
 
+    const [pageModule, schemaModule] = await Promise.all([
+        matched.route.component(),
+        matched.route.schema(),
+    ]);
+    const props = schemaModule.PropsSchema.parse(rawProps);
     const allProps = { ...props, params: matched.params };
-    const pageModule = await matched.route.component();
     const html = renderToString(pageModule.default(allProps));
     const propsJson = escapeJsonForScript(JSON.stringify(allProps));
 
@@ -50,10 +54,12 @@ export async function render(url: string, props: any): Promise<string> {
     const clientScript = `/src/client.tsx`;
 
     return `<!DOCTYPE html>
-<html>
+<html lang="ja">
 <head>
     <meta charset="utf-8" />
-    <title>Forte App</title>
+    <meta name="viewport" content="width=device-width" />
+    <title>ls-news</title>
+    <link rel="stylesheet" href="/src/styles/globals.css" />
     ${viteScripts}
 </head>
 <body>
@@ -65,13 +71,17 @@ export async function render(url: string, props: any): Promise<string> {
 }
 
 (globalThis as any).handler = async function handler(request: Request): Promise<Response> {
-    const props = await request.json();
+    const rawProps = await request.json();
     const url = new URL(request.url);
 
     const matched = matchRoute(url.pathname);
     if (matched) {
+        const [pageModule, schemaModule] = await Promise.all([
+            matched.route.component(),
+            matched.route.schema(),
+        ]);
+        const props = schemaModule.PropsSchema.parse(rawProps);
         const allProps = { ...props, params: matched.params };
-        const pageModule = await matched.route.component();
         const html = renderToString(pageModule.default(allProps));
         const propsJson = escapeJsonForScript(JSON.stringify(allProps));
 
@@ -82,12 +92,18 @@ export async function render(url: string, props: any): Promise<string> {
             ? `/src/client.tsx`
             : `/public/client.js`;
 
+        const cssLink = isDev
+            ? `<link rel="stylesheet" href="/src/styles/globals.css" />`
+            : `<link rel="stylesheet" href="/public/globals.css" />`;
+
         return new Response(
             `<!DOCTYPE html>
-<html>
+<html lang="ja">
 <head>
     <meta charset="utf-8" />
-    <title>Forte App</title>
+    <meta name="viewport" content="width=device-width" />
+    <title>ls-news</title>
+    ${cssLink}
     ${viteScripts}
 </head>
 <body>

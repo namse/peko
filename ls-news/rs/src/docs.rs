@@ -17,7 +17,25 @@ impl<T: AsRef<str>> AsOptStr for &Option<T> {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
+pub struct User {
+    pub id: String,
+    pub username: String,
+    pub avatar_url: String,
+    pub created_at: DateTime,
+    pub updated_at: DateTime,
+}
+impl User {
+    pub async fn get(sk: impl AsRef<str>) -> Result<Option<User>> {
+        Ok(forte_db::turso()
+            .get("users", sk.as_ref())
+            .await?
+            .map(|data| serde_json::from_slice(&data))
+            .transpose()?)
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Post {
     pub id: String,
     pub title: String,
@@ -40,7 +58,7 @@ impl Post {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct DeletedPost {
     pub post: Post,
     pub deleted_at: DateTime,

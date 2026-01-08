@@ -2,6 +2,24 @@ use bytes::{BufMut, Bytes, BytesMut};
 use futures::stream::Stream;
 use serde::ser::{self, Serialize, SerializeSeq};
 
+fn to_camel_case(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut capitalize_next = false;
+
+    for ch in s.chars() {
+        if ch == '_' {
+            capitalize_next = true;
+        } else if capitalize_next {
+            result.push(ch.to_ascii_uppercase());
+            capitalize_next = false;
+        } else {
+            result.push(ch);
+        }
+    }
+
+    result
+}
+
 pub fn to_stream<T: Serialize + ?Sized>(value: &T) -> impl Stream<Item = Bytes> + use<T> {
     let mut ser = Serializer::new();
     value.serialize(&mut ser).unwrap();
@@ -401,7 +419,8 @@ impl<'a> ser::SerializeStruct for Compound<'a> {
         if !matches!(state, State::First) {
             ser.write_bytes(b",");
         }
-        ser.write_string_value(key);
+        let camel_key = to_camel_case(key);
+        ser.write_string_value(&camel_key);
         ser.write_bytes(b":");
         value.serialize(&mut **ser)?;
         Ok(())
@@ -448,7 +467,8 @@ impl<'a> ser::SerializeStructVariant for Compound<'a> {
         if !matches!(state, State::First) {
             ser.write_bytes(b",");
         }
-        ser.write_string_value(key);
+        let camel_key = to_camel_case(key);
+        ser.write_string_value(&camel_key);
         ser.write_bytes(b":");
         value.serialize(&mut **ser)?;
         Ok(())

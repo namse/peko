@@ -136,3 +136,21 @@ async fn test_struct_with_option() {
     let json = stream_to_string(&v2).await;
     assert_eq!(json, r#"{"required":20,"optional":null}"#);
 }
+
+#[derive(Serialize)]
+struct SnakeCaseFields {
+    first_name: String,
+    last_name: String,
+    user_age: u32,
+}
+
+#[tokio::test]
+async fn test_snake_case_to_camel_case() {
+    let value = SnakeCaseFields {
+        first_name: "John".to_string(),
+        last_name: "Doe".to_string(),
+        user_age: 25,
+    };
+    let json = stream_to_string(&value).await;
+    assert_eq!(json, r#"{"firstName":"John","lastName":"Doe","userAge":25}"#);
+}

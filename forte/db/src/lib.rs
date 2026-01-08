@@ -22,15 +22,8 @@ pub enum BatchOp<'a> {
 /// - `TURSO_URL`: The URL of the Turso database.
 /// - `TURSO_AUTH_TOKEN`: The authentication token for the Turso database.
 pub fn turso() -> Database {
-    let url = std::env::var("TURSO_URL").expect("TURSO_URL env var not set");
-    let auth_token = std::env::var("TURSO_AUTH_TOKEN").expect("TURSO_AUTH_TOKEN env var not set");
-    turso_with_config(url, auth_token)
-}
-
-/// Create a Turso database instance with explicit configuration.
-/// - `url`: The URL of the Turso database (supports http, https, libsql schemes).
-/// - `auth_token`: The authentication token. Pass empty string for no authentication.
-pub fn turso_with_config(url: String, auth_token: String) -> Database {
+    let url = std::env::var("TURSO_URL").unwrap_or("http://127.0.0.1:8080".to_string());
+    let auth_token = std::env::var("TURSO_AUTH_TOKEN").unwrap_or_default();
     Database {
         inner: DatabaseInner::Turso(TursoDatabase::new(url, auth_token)),
     }
