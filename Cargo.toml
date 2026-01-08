@@ -1,7 +1,13 @@
 [workspace]
 resolver = "3"
 members = ["adapt-cache", "doc-db", "forte/db", "forte/rs-sdk"]
-exclude = ["ls-news/rs", "forte/forte", "wasmtime", "ski"]
+exclude = [
+    "ls-news/rs",
+    "forte/forte",
+    "wasmtime",
+    "ski",
+    "forte/forte-rs-to-ts",
+]
 
 [workspace.dependencies]
 anyhow = "1"

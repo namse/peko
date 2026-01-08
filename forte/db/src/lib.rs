@@ -63,7 +63,7 @@ impl Database {
         &self,
         pk: S1,
         after_sk: Option<S2>,
-        limit: u32,
+        limit: usize,
     ) -> Result<Vec<(String, Bytes)>> {
         match &self.inner {
             DatabaseInner::Turso(db) => db.query(pk, after_sk, limit).await,
@@ -73,7 +73,7 @@ impl Database {
     pub async fn scan(
         &self,
         after: Option<(&str, &str)>,
-        limit: u32,
+        limit: usize,
     ) -> Result<Vec<(String, String, Bytes)>> {
         match &self.inner {
             DatabaseInner::Turso(db) => db.scan(after, limit).await,

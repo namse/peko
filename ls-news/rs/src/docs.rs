@@ -1,19 +1,20 @@
-use forte_sdk::*;
+use forte_sdk::{anyhow::Result, *};
 use serde::{Deserialize, Serialize};
 
-trait Doc {
-    type Pk;
-    type Sk;
-
-    fn pk(pk: Self::Pk) -> String;
-    fn sk(sk: Self::Sk) -> String;
-
-    fn turso_query()
+pub trait AsOptStr {
+    fn as_opt_str(&self) -> Option<&str>;
 }
 
-pub struct PostPk;
-pub struct PostSk {
-    pub id: String,
+impl<T: AsRef<str>> AsOptStr for Option<T> {
+    fn as_opt_str(&self) -> Option<&str> {
+        self.as_ref().map(|s| s.as_ref())
+    }
+}
+
+impl<T: AsRef<str>> AsOptStr for &Option<T> {
+    fn as_opt_str(&self) -> Option<&str> {
+        self.as_ref().map(|s| s.as_ref())
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -28,23 +29,15 @@ pub struct Post {
     pub created_at: DateTime,
     pub updated_at: DateTime,
 }
-
-impl Doc for Post {
-    type Pk = PostPk;
-    type Sk = PostSk;
-
-    fn pk(_pk: Self::Pk) -> String {
-        "posts".to_string()
+impl Post {
+    pub async fn query(after_sk: impl AsOptStr, limit: usize) -> Result<Vec<Post>> {
+        Ok(forte_db::turso()
+            .query("posts", after_sk.as_opt_str(), limit)
+            .await?
+            .into_iter()
+            .map(|(_sk, data)| serde_json::from_slice(&data))
+            .collect::<Result<Vec<Post>, _>>()?)
     }
-
-    fn sk(sk: Self::Sk) -> String {
-        format!("id={}", sk.id)
-    }
-}
-
-pub struct DeletedPostPk;
-pub struct DeletedPostSk {
-    pub id: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -52,16 +45,13 @@ pub struct DeletedPost {
     pub post: Post,
     pub deleted_at: DateTime,
 }
-
-impl Doc for DeletedPost {
-    type Pk = DeletedPostPk;
-    type Sk = DeletedPostSk;
-
-    fn pk(_pk: Self::Pk) -> String {
-        "deleted_posts".to_string()
-    }
-
-    fn sk(sk: Self::Sk) -> String {
-        format!("id={}", sk.id)
+impl DeletedPost {
+    pub async fn query(after_sk: impl AsOptStr, limit: usize) -> Result<Vec<DeletedPost>> {
+        Ok(forte_db::turso()
+            .query("deleted_posts", after_sk.as_opt_str(), limit)
+            .await?
+            .into_iter()
+            .map(|(_sk, data)| serde_json::from_slice(&data))
+            .collect::<Result<Vec<DeletedPost>, _>>()?)
     }
 }

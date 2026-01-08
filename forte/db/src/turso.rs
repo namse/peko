@@ -261,7 +261,7 @@ impl TursoDatabase {
         &self,
         pk: S1,
         after_sk: Option<S2>,
-        limit: u32,
+        limit: usize,
     ) -> Result<Vec<(String, Bytes)>> {
         let pk: Arc<str> = pk.as_ref().to_string().into();
         let after_sk: Option<Arc<str>> = after_sk.map(|s| s.as_ref().to_string().into());
@@ -349,7 +349,7 @@ impl TursoDatabase {
     pub(crate) async fn scan(
         &self,
         after: Option<(&str, &str)>,
-        limit: u32,
+        limit: usize,
     ) -> Result<Vec<(String, String, Bytes)>> {
         for retry in 0..2 {
             let (sql, args) = match after {

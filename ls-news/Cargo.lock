@@ -198,15 +198,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "forte-macros"
-version = "0.1.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
 name = "forte-sdk"
 version = "0.1.0"
 dependencies = [
@@ -215,7 +206,6 @@ dependencies = [
  "cookie",
  "forte-db",
  "forte-json",
- "forte-macros",
  "hex",
  "hmac",
  "http",

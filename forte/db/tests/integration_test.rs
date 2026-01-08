@@ -1,10 +1,9 @@
-use db::{BatchOp, turso_with_config};
+use forte_db::{BatchOp, turso_with_config};
 
 const LOCAL_LIBSQL_URL: &str = "http://127.0.0.1:8080";
 
-fn create_test_db() -> db::Database {
+fn create_test_db() -> forte_db::Database {
     turso_with_config(LOCAL_LIBSQL_URL.to_string(), String::new())
-        .expect("Failed to create test database")
 }
 
 #[wstd::test]
@@ -119,7 +118,7 @@ async fn test_query() {
     }
 
     // Query first page (limit 2)
-    let page1 = db.query(pk, None, 2).await.expect("Query failed");
+    let page1 = db.query(pk, None::<&str>, 2).await.expect("Query failed");
     assert_eq!(page1.len(), 2);
     assert_eq!(page1[0].0, "sk_00");
     assert_eq!(page1[1].0, "sk_01");
@@ -230,7 +229,7 @@ async fn test_batch_put() {
     db.batch(&ops).await.expect("Batch put failed");
 
     // Verify all items were inserted
-    let result = db.query(pk, None, 10).await.expect("Query failed");
+    let result = db.query(pk, None::<&str>, 10).await.expect("Query failed");
     assert_eq!(result.len(), 3);
     assert_eq!(result[0].0, "sk_1");
     assert_eq!(result[1].0, "sk_2");
@@ -245,7 +244,7 @@ async fn test_batch_put() {
     db.batch(&delete_ops).await.expect("Batch delete failed");
 
     // Verify all items were deleted
-    let result = db.query(pk, None, 10).await.expect("Query failed");
+    let result = db.query(pk, None::<&str>, 10).await.expect("Query failed");
     assert_eq!(result.len(), 0);
 }
 
