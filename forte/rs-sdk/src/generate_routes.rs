@@ -23,13 +23,27 @@ struct PageInfo {
     module_name: String,
     module_path: String,
     route_path: String,
+    route_segments: Vec<RouteSegment>,
+    path_params: Option<Vec<PathParamField>>,
     search_params: Option<Vec<SearchParamField>>,
+}
+
+#[derive(Debug, Clone)]
+enum RouteSegment {
+    Static(String),
+    Dynamic(String), // [id] -> "id"
 }
 
 #[derive(Debug)]
 struct SearchParamField {
     name: String,
     is_optional: bool,
+    inner_type: String,
+}
+
+#[derive(Debug)]
+struct PathParamField {
+    name: String,
     inner_type: String,
 }
 
@@ -51,6 +65,30 @@ fn parse_search_params(content: &str) -> Option<Vec<SearchParamField>> {
                         is_optional,
                         inner_type,
                     });
+                }
+            }
+
+            return Some(fields);
+        }
+    }
+
+    None
+}
+
+fn parse_path_params(content: &str) -> Option<Vec<PathParamField>> {
+    let syntax_tree = syn::parse_file(content).ok()?;
+
+    for item in syntax_tree.items {
+        if let syn::Item::Struct(item_struct) = item
+            && item_struct.ident == "PathParams"
+        {
+            let mut fields = Vec::new();
+
+            if let syn::Fields::Named(named_fields) = item_struct.fields {
+                for field in named_fields.named {
+                    let name = field.ident?.to_string();
+                    let (_is_optional, inner_type) = extract_type_info(&field.ty);
+                    fields.push(PathParamField { name, inner_type });
                 }
             }
 
@@ -104,7 +142,21 @@ fn discover_pages_recursive(base_dir: &Path, current_dir: &Path, pages: &mut Vec
                     .map(|c| c.as_os_str().to_string_lossy().to_string())
                     .collect();
 
-                let module_name = format!("pages_{}", path_segments.join("_"));
+                // module_name: [id] -> _id_ for valid identifier
+                let module_name = format!(
+                    "pages_{}",
+                    path_segments
+                        .iter()
+                        .map(|s| {
+                            if s.starts_with('[') && s.ends_with(']') {
+                                format!("_{}_", &s[1..s.len() - 1])
+                            } else {
+                                s.clone()
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .join("_")
+                );
                 let module_path = format!("pages/{}/mod.rs", path_segments.join("/"));
                 let route_path = if path_segments == vec!["index"] {
                     "/".to_string()
@@ -112,14 +164,32 @@ fn discover_pages_recursive(base_dir: &Path, current_dir: &Path, pages: &mut Vec
                     format!("/{}", path_segments.join("/"))
                 };
 
-                let search_params = fs::read_to_string(&mod_rs)
-                    .ok()
-                    .and_then(|content| parse_search_params(&content));
+                // Parse route segments for pattern matching
+                let route_segments: Vec<RouteSegment> = path_segments
+                    .iter()
+                    .map(|s| {
+                        if s.starts_with('[') && s.ends_with(']') {
+                            RouteSegment::Dynamic(s[1..s.len() - 1].to_string())
+                        } else {
+                            RouteSegment::Static(s.clone())
+                        }
+                    })
+                    .collect();
+
+                let content = fs::read_to_string(&mod_rs).ok();
+                let search_params = content
+                    .as_ref()
+                    .and_then(|c| parse_search_params(c));
+                let path_params = content
+                    .as_ref()
+                    .and_then(|c| parse_path_params(c));
 
                 pages.push(PageInfo {
                     module_name,
                     module_path,
                     route_path,
+                    route_segments,
+                    path_params,
                     search_params,
                 });
             }
@@ -221,53 +291,79 @@ fn generate_module_declarations(pages: &[PageInfo]) -> Vec<TokenStream> {
         .collect()
 }
 
+fn has_dynamic_segments(segments: &[RouteSegment]) -> bool {
+    segments
+        .iter()
+        .any(|s| matches!(s, RouteSegment::Dynamic(_)))
+}
+
 fn generate_route_matches(pages: &[PageInfo]) -> Vec<TokenStream> {
     pages
         .iter()
         .map(|page| {
             let module_name = format_ident!("{}", page.module_name);
-            let route_path = &page.route_path;
 
-            if let Some(fields) = &page.search_params {
-                let field_parsers = generate_field_parsers(fields);
+            // Generate route condition
+            let route_condition = if has_dynamic_segments(&page.route_segments) {
+                generate_dynamic_route_condition(&page.route_segments)
+            } else {
+                let route_path = &page.route_path;
+                quote! { path == #route_path }
+            };
+
+            // Generate path params extraction (if dynamic)
+            let path_params_extraction = if page.path_params.is_some() {
+                generate_path_params_extraction(&module_name, &page.route_segments, page.path_params.as_ref().unwrap())
+            } else {
+                quote! {}
+            };
+
+            // Generate search params extraction
+            let search_params_extraction = if let Some(fields) = &page.search_params {
+                let field_parsers = generate_search_field_parsers(fields);
                 let field_names: Vec<_> =
                     fields.iter().map(|f| format_ident!("{}", f.name)).collect();
-
                 quote! {
-                    if path == #route_path {
-                        #(#field_parsers)*
-
-                        let search_params = #module_name::SearchParams {
-                            #(#field_names),*
-                        };
-                        match #module_name::handler(headers, cookie_jar, search_params).await {
-                            Ok(props) => {
-                                let stream = forte_json::to_stream(&props);
-                                Ok(Response::new(Body::from_stream(stream)))
-                            }
-                            Err(e) => {
-                                Ok(Response::builder()
-                                    .status(StatusCode::INTERNAL_SERVER_ERROR)
-                                    .body(Body::from(format!("Error: {:?}", e)))
-                                    .unwrap())
-                            }
-                        }
-                    }
+                    #(#field_parsers)*
+                    let search_params = #module_name::SearchParams {
+                        #(#field_names),*
+                    };
                 }
             } else {
-                quote! {
-                    if path == #route_path {
-                        match #module_name::handler(headers, cookie_jar).await {
-                            Ok(props) => {
-                                let stream = forte_json::to_stream(&props);
-                                Ok(Response::new(Body::from_stream(stream)))
-                            }
-                            Err(e) => {
-                                Ok(Response::builder()
-                                    .status(StatusCode::INTERNAL_SERVER_ERROR)
-                                    .body(Body::from(format!("Error: {:?}", e)))
-                                    .unwrap())
-                            }
+                quote! {}
+            };
+
+            // Generate handler call based on what params exist
+            let handler_call = match (&page.path_params, &page.search_params) {
+                (Some(_), Some(_)) => quote! {
+                    #module_name::handler(headers, cookie_jar, path_params, search_params).await
+                },
+                (Some(_), None) => quote! {
+                    #module_name::handler(headers, cookie_jar, path_params).await
+                },
+                (None, Some(_)) => quote! {
+                    #module_name::handler(headers, cookie_jar, search_params).await
+                },
+                (None, None) => quote! {
+                    #module_name::handler(headers, cookie_jar).await
+                },
+            };
+
+            quote! {
+                if #route_condition {
+                    #path_params_extraction
+                    #search_params_extraction
+
+                    match #handler_call {
+                        Ok(props) => {
+                            let stream = forte_json::to_stream(&props);
+                            Ok(Response::new(Body::from_stream(stream)))
+                        }
+                        Err(e) => {
+                            Ok(Response::builder()
+                                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                                .body(Body::from(format!("Error: {:?}", e)))
+                                .unwrap())
                         }
                     }
                 }
@@ -276,7 +372,88 @@ fn generate_route_matches(pages: &[PageInfo]) -> Vec<TokenStream> {
         .collect()
 }
 
-fn generate_field_parsers(fields: &[SearchParamField]) -> Vec<TokenStream> {
+fn generate_dynamic_route_condition(segments: &[RouteSegment]) -> TokenStream {
+    let segment_count = segments.len();
+    let segment_checks: Vec<TokenStream> = segments
+        .iter()
+        .enumerate()
+        .filter_map(|(i, seg)| {
+            if let RouteSegment::Static(s) = seg {
+                Some(quote! { path_segments.get(#i) == Some(&#s) })
+            } else {
+                None // Dynamic segments match anything
+            }
+        })
+        .collect();
+
+    if segment_checks.is_empty() {
+        quote! {
+            {
+                let path_segments: Vec<&str> = path.trim_start_matches('/').split('/').collect();
+                path_segments.len() == #segment_count
+            }
+        }
+    } else {
+        quote! {
+            {
+                let path_segments: Vec<&str> = path.trim_start_matches('/').split('/').collect();
+                path_segments.len() == #segment_count && #(#segment_checks)&&*
+            }
+        }
+    }
+}
+
+fn generate_path_params_extraction(
+    module_name: &syn::Ident,
+    route_segments: &[RouteSegment],
+    path_params: &[PathParamField],
+) -> TokenStream {
+    let extractions: Vec<TokenStream> = route_segments
+        .iter()
+        .enumerate()
+        .filter_map(|(i, seg)| {
+            if let RouteSegment::Dynamic(param_name) = seg {
+                // Find the corresponding PathParamField
+                let field = path_params.iter().find(|f| &f.name == param_name)?;
+                let field_ident = format_ident!("{}", field.name);
+                let inner_type: TokenStream = field.inner_type.parse().unwrap();
+
+                if field.inner_type == "String" {
+                    Some(quote! {
+                        let #field_ident: String = path_segments[#i].to_string();
+                    })
+                } else {
+                    Some(quote! {
+                        let #field_ident: #inner_type = match path_segments[#i].parse::<#inner_type>() {
+                            Ok(v) => v,
+                            Err(_) => {
+                                return Ok(Response::builder()
+                                    .status(StatusCode::BAD_REQUEST)
+                                    .body(Body::from(format!("Invalid path parameter: {}", stringify!(#field_ident))))
+                                    .unwrap());
+                            }
+                        };
+                    })
+                }
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    let field_names: Vec<_> = path_params
+        .iter()
+        .map(|f| format_ident!("{}", f.name))
+        .collect();
+
+    quote! {
+        let path_segments: Vec<&str> = path.trim_start_matches('/').split('/').collect();
+        #(#extractions)*
+        let path_params = #module_name::PathParams { #(#field_names),* };
+    }
+}
+
+fn generate_search_field_parsers(fields: &[SearchParamField]) -> Vec<TokenStream> {
     fields
         .iter()
         .map(|field| {
@@ -329,3 +506,4 @@ fn generate_field_parsers(fields: &[SearchParamField]) -> Vec<TokenStream> {
         })
         .collect()
 }
+

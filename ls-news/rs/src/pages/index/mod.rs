@@ -1,11 +1,10 @@
-use std::collections::HashSet;
-
 use crate::docs::{DeletedPost, Post, User};
 use anyhow::Result;
 use cookie::CookieJar;
 use forte_sdk::*;
 use http::HeaderMap;
 use serde::Serialize;
+use std::collections::HashSet;
 
 pub struct SearchParams {
     pub after: Option<String>,

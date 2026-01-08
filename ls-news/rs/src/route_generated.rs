@@ -1,5 +1,7 @@
 #[path = "pages/index/mod.rs"]
 mod pages_index;
+#[path = "pages/post/[id]/mod.rs"]
+mod pages_post__id_;
 use forte_sdk::anyhow::Result;
 use forte_sdk::wstd::http::{Error, Request, Response, StatusCode, body::Body, HeaderMap};
 use forte_sdk::http::header::COOKIE;
@@ -26,6 +28,27 @@ pub async fn main(request: Request<Body>) -> Result<Response<Body>, Error> {
         let after: Option<String> = query_params.get("after").cloned();
         let search_params = pages_index::SearchParams { after };
         match pages_index::handler(headers, cookie_jar, search_params).await {
+            Ok(props) => {
+                let stream = forte_json::to_stream(&props);
+                Ok(Response::new(Body::from_stream(stream)))
+            }
+            Err(e) => {
+                Ok(
+                    Response::builder()
+                        .status(StatusCode::INTERNAL_SERVER_ERROR)
+                        .body(Body::from(format!("Error: {:?}", e)))
+                        .unwrap(),
+                )
+            }
+        }
+    } else if {
+        let path_segments: Vec<&str> = path.trim_start_matches('/').split('/').collect();
+        path_segments.len() == 2usize && path_segments.get(0usize) == Some(&"post")
+    } {
+        let path_segments: Vec<&str> = path.trim_start_matches('/').split('/').collect();
+        let id: String = path_segments[1usize].to_string();
+        let path_params = pages_post__id_::PathParams { id };
+        match pages_post__id_::handler(headers, cookie_jar, path_params).await {
             Ok(props) => {
                 let stream = forte_json::to_stream(&props);
                 Ok(Response::new(Body::from_stream(stream)))

@@ -48,6 +48,13 @@ pub struct Post {
     pub updated_at: DateTime,
 }
 impl Post {
+    pub async fn get(sk: impl AsRef<str>) -> Result<Option<Post>> {
+        Ok(forte_db::turso()
+            .get("posts", sk.as_ref())
+            .await?
+            .map(|data| serde_json::from_slice(&data))
+            .transpose()?)
+    }
     pub async fn query(after_sk: impl AsOptStr, limit: usize) -> Result<Vec<Post>> {
         Ok(forte_db::turso()
             .query("posts", after_sk.as_opt_str(), limit)
@@ -72,4 +79,21 @@ impl DeletedPost {
             .map(|(_sk, data)| serde_json::from_slice(&data))
             .collect::<Result<Vec<DeletedPost>, _>>()?)
     }
+}
+
+pub struct Comment {
+    pub id: String,
+    pub content: String,
+    pub post_id: String,
+    pub author_id: String,
+    pub parent_comment_id: Option<String>,
+    pub likes: usize,
+    pub dislikes: usize,
+    pub created_at: DateTime,
+    pub updated_at: DateTime,
+}
+
+pub struct DeletedComment {
+    pub comment: Comment,
+    pub deleted_at: DateTime,
 }
