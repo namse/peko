@@ -158,6 +158,9 @@ pub fn apply_name_resolution_to_type(ty: &mut TsType, name_map: &HashMap<String,
         TsType::Undefined(inner) => {
             apply_name_resolution_to_type(inner, name_map);
         }
+        TsType::Record(inner) => {
+            apply_name_resolution_to_type(inner, name_map);
+        }
         TsType::Primitive(_) => {}
         TsType::Date => {}
         TsType::Literal(_) => {}

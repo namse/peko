@@ -1,4 +1,4 @@
-use crate::docs::{DeletedPost, Post, User};
+use crate::docs::{DeletedPost, Post, UserDoc};
 use anyhow::Result;
 use cookie::CookieJar;
 use forte_sdk::*;
@@ -12,7 +12,7 @@ pub struct SearchParams {
 
 #[derive(Serialize)]
 pub enum Props {
-    Ok { rows: Vec<Row> },
+    Ok { rows: Vec<Row>, me: Option<User> },
     DbErr { message: String },
 }
 
@@ -23,12 +23,19 @@ pub struct Row {
     pub author: User,
 }
 
+#[derive(Serialize)]
+pub struct User {
+    pub id: String,
+    pub username: String,
+    pub avatar_url: String,
+}
+
 pub async fn handler(
     _headers: HeaderMap,
-    jar: CookieJar,
+    jar: &mut CookieJar,
     search_params: SearchParams,
 ) -> Result<Props> {
-    let is_admin = crate::common::auth::is_admin(&jar);
+    let is_admin = crate::common::auth::is_admin(jar);
 
     let rows = match get_rows(search_params.after, is_admin).await {
         Ok(rows) => rows,
@@ -40,7 +47,16 @@ pub async fn handler(
         }
     };
 
-    Ok(Props::Ok { rows })
+    let me = crate::common::auth::get_me(jar);
+
+    Ok(Props::Ok {
+        rows,
+        me: me.map(|me| User {
+            id: me.user_id,
+            username: me.username,
+            avatar_url: me.avatar_url,
+        }),
+    })
 }
 
 async fn get_rows(after: Option<String>, is_admin: bool) -> Result<Vec<Row>> {
@@ -71,7 +87,7 @@ async fn get_rows(after: Option<String>, is_admin: bool) -> Result<Vec<Row>> {
         .map(|r| r.post.author_id.clone())
         .collect::<HashSet<_>>();
 
-    let users = futures::future::try_join_all(user_ids.iter().map(User::get))
+    let users = futures::future::try_join_all(user_ids.iter().map(UserDoc::get))
         .await?
         .into_iter()
         .flatten()
@@ -85,12 +101,15 @@ async fn get_rows(after: Option<String>, is_admin: bool) -> Result<Vec<Row>> {
                 .iter()
                 .find(|u| u.id == row.post.author_id)
                 .cloned()
+                .map(|x| User {
+                    id: x.id,
+                    username: x.username,
+                    avatar_url: x.avatar_url,
+                })
                 .unwrap_or(User {
                     id: "0".to_string(),
                     username: "GHOST".to_string(),
                     avatar_url: "".to_string(),
-                    created_at: DateTime::from_timestamp(0, 0).unwrap(),
-                    updated_at: DateTime::from_timestamp(0, 0).unwrap(),
                 }),
             post: row.post,
         })

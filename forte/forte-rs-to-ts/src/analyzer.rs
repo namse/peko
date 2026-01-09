@@ -36,8 +36,21 @@ fn convert_rust_path_to_ts_path(rust_path: &str, ts_output_dir: &str) -> PathBuf
     let src_pages_idx = path_parts.iter().position(|&p| p == "pages");
 
     if let Some(idx) = src_pages_idx {
-        let after_pages = &path_parts[idx + 1..path_parts.len() - 1];
-        let relative_path = after_pages.join("/");
+        let after_pages = &path_parts[idx + 1..];
+        let relative_path = if after_pages.last() == Some(&"mod.rs") {
+            after_pages[..after_pages.len() - 1].join("/")
+        } else if let Some(last) = after_pages.last()
+            && last.ends_with(".rs")
+        {
+            let file_stem = last.trim_end_matches(".rs");
+            if after_pages.len() == 1 {
+                file_stem.to_string()
+            } else {
+                format!("{}/{}", after_pages[..after_pages.len() - 1].join("/"), file_stem)
+            }
+        } else {
+            after_pages.join("/")
+        };
 
         let mut output_path = PathBuf::from(ts_output_dir);
         output_path.push(relative_path);
@@ -121,14 +134,25 @@ impl Callbacks for Analyzer {
                     && let Some(local_path) = path.into_local_path()
                 {
                     let path_str = local_path.to_string_lossy();
-                    if path_str.contains("src/pages") && path_str.ends_with("mod.rs") {
-                        let path_parts: Vec<&str> = path_str.split('/').collect();
-                        let src_pages_idx = path_parts.iter().position(|&p| p == "pages");
-                        if let Some(idx) = src_pages_idx {
-                            let after_pages = &path_parts[idx + 1..path_parts.len() - 1];
-                            if after_pages.len() <= 2 {
-                                let mut modules = page_modules.lock().unwrap();
-                                modules.push(def_id);
+                    if path_str.contains("src/pages") {
+                        let is_mod_rs = path_str.ends_with("mod.rs");
+                        let is_single_page_rs = !is_mod_rs
+                            && path_str.ends_with(".rs")
+                            && !path_str.contains("/api/");
+
+                        if is_mod_rs || is_single_page_rs {
+                            let path_parts: Vec<&str> = path_str.split('/').collect();
+                            let src_pages_idx = path_parts.iter().position(|&p| p == "pages");
+                            if let Some(idx) = src_pages_idx {
+                                let after_pages = if is_mod_rs {
+                                    &path_parts[idx + 1..path_parts.len() - 1]
+                                } else {
+                                    &path_parts[idx + 1..path_parts.len()]
+                                };
+                                if after_pages.len() <= 2 {
+                                    let mut modules = page_modules.lock().unwrap();
+                                    modules.push(def_id);
+                                }
                             }
                         }
                     }

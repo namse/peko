@@ -2,4 +2,6 @@
 
 export const routes: Array<{ path: string; component: () => Promise<{ default: (props: any) => any }>; schema: () => Promise<{ PropsSchema: any }> }> = [
   { path: "/", component: () => import("./pages/index/page"), schema: () => import("./pages/index/.props") },
+  { path: "/write", component: () => import("./pages/write/page"), schema: () => import("./pages/write/.props") },
+  { path: "/post/:id", component: () => import("./pages/post/[id]/page"), schema: () => import("./pages/post/[id]/.props") },
 ];

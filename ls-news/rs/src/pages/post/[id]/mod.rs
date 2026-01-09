@@ -1,129 +1,77 @@
-use crate::docs::{Comment, DeletedPost, Post, User};
+use crate::docs::*;
 use anyhow::Result;
 use cookie::CookieJar;
 use forte_sdk::*;
 use http::HeaderMap;
 use serde::Serialize;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 pub struct PathParams {
     pub id: String,
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Serialize)]
 pub enum Props {
-    Ok { post: Post, comments: Vec<Comment> },
-    DbErr { message: String },
+    Ok {
+        post: Post,
+        comments: Vec<Comment>,
+        users: HashMap<String, UserDoc>,
+    },
+    // TODO: Return status 404
+    NotFound,
+    DbErr {
+        message: String,
+    },
 }
 
 pub async fn handler(
     _headers: HeaderMap,
-    jar: CookieJar,
+    jar: &mut CookieJar,
     path_params: PathParams,
 ) -> Result<Props> {
-    let is_admin = crate::common::auth::is_admin(&jar);
+    let is_admin = crate::common::auth::is_admin(jar);
 
-    let rows = match get_rows(search_params.after, is_admin).await {
-        Ok(rows) => rows,
+    match get_post_with_comments(&path_params.id, is_admin).await {
+        Ok(Some((post, comments, users))) => Ok(Props::Ok {
+            post,
+            comments,
+            users,
+        }),
+        Ok(None) => Ok(Props::NotFound),
         Err(err) => {
-            eprintln!("Failed to get posts: {err}");
-            return Ok(Props::DbErr {
-                message: "Failed to get posts".to_string(),
-            });
+            eprintln!("Error: {}", err);
+            Ok(Props::DbErr {
+                message: "Failed to get post with comments".to_string(),
+            })
         }
-    };
-
-    Ok(Props::Ok { rows })
+    }
 }
 
-async fn get_post_with_comments(post_id: &str, is_admin: bool) -> Result<(Post, Vec<Comment>)> {
-    let post = Post::get(post_id).await?;
-    //     export async function dbGetPostWithComments({
-    //   postId,
-    //   userId,
-    //   isAdmin,
-    // }: {
-    //   postId: number;
-    //   userId: number | undefined;
-    //   isAdmin: boolean;
-    // }): Promise<{
-    //   post:
-    //     | (typeof Posts.$inferSelect & {
-    //         author: typeof Users.$inferSelect;
-    //         userVote: "like" | "dislike" | null;
-    //       })
-    //     | null;
-    //   comments: (typeof Comments.$inferSelect & {
-    //     author: typeof Users.$inferSelect;
-    //     userCommentVote: "like" | "dislike" | null;
-    //   })[];
-    // }> {
-    //   const [[postResult], commentRows] = await db.batch([
-    //     db
-    //       .select({
-    //         post: Posts,
-    //         author: Users,
-    //         userLiked: PostVotes.isLike,
-    //       })
-    //       .from(Posts)
-    //       .where(
-    //         isAdmin
-    //           ? eq(Posts.id, postId)
-    //           : and(eq(Posts.id, postId), isNull(Posts.deletedAt))
-    //       )
-    //       .innerJoin(Users, eq(Posts.authorId, Users.id))
-    //       .leftJoin(
-    //         PostVotes,
-    //         and(
-    //           eq(PostVotes.postId, Posts.id),
-    //           eq(PostVotes.userId, userId ?? sql`null`)
-    //         )
-    //       ),
-    //     db
-    //       .select({
-    //         comment: Comments,
-    //         commentAuthor: Users,
-    //         userCommentVote: CommentVotes.isLike,
-    //       })
-    //       .from(Comments)
-    //       .where(eq(Comments.postId, postId))
-    //       .innerJoin(Users, eq(Comments.authorId, Users.id))
-    //       .leftJoin(
-    //         CommentVotes,
-    //         and(
-    //           eq(CommentVotes.commentId, Comments.id),
-    //           eq(CommentVotes.userId, userId ?? sql`null`)
-    //         )
-    //       ),
-    //   ]);
+async fn get_post_with_comments(
+    post_id: &str,
+    is_admin: bool,
+) -> Result<Option<(Post, Vec<Comment>, HashMap<String, UserDoc>)>> {
+    let Some(post) = Post::get(post_id).await? else {
+        return Ok(None);
+    };
+    let mut comments = Comment::query(post_id, (), 1000).await?;
+    if is_admin {
+        let deleted_comments = DeletedComment::query(post_id, (), 1000).await?;
+        comments.extend(deleted_comments.into_iter().map(|comment| comment.comment));
+        comments.sort_by_key(|comment| comment.created_at);
+    }
 
-    //   const post = postResult
-    //     ? {
-    //         ...postResult.post,
-    //         author: postResult.author,
-    //         userVote: (postResult.userLiked === true
-    //           ? "like"
-    //           : postResult.userLiked === false
-    //             ? "dislike"
-    //             : null) as "like" | "dislike" | null,
-    //       }
-    //     : null;
-
-    //   const comments = commentRows.map((x) => {
-    //     return {
-    //       ...x.comment,
-    //       content: x.comment.deletedAt && !isAdmin ? "" : x.comment.content,
-    //       author: x.commentAuthor,
-    //       userCommentVote: (x.userCommentVote === true
-    //         ? "like"
-    //         : x.userCommentVote === false
-    //           ? "dislike"
-    //           : null) as "like" | "dislike" | null,
-    //     };
-    //   });
-
-    //   return { post, comments };
-    // }
-
-    todo!()
+    let user_ids = comments
+        .iter()
+        .map(|comment| comment.author_id.clone())
+        .chain(std::iter::once(post.author_id.clone()))
+        .collect::<HashSet<_>>();
+    let users = futures::future::try_join_all(user_ids.iter().map(UserDoc::get))
+        .await?
+        .into_iter()
+        .flatten()
+        .map(|user| (user.id.clone(), user))
+        .collect::<HashMap<_, _>>();
+    Ok(Some((post, comments, users)))
 }

@@ -1,6 +1,10 @@
 import { Link } from "@/components/ui/link";
 
-export function NewsHeader() {
+export function NewsHeader({
+  me,
+}: {
+  me?: { id: string; username: string; avatarUrl: string };
+}) {
   return (
     <header className="border-b bg-background">
       <nav className="container mx-auto px-4 py-3">
@@ -15,12 +19,37 @@ export function NewsHeader() {
             <div className="flex items-center gap-3 text-sm">
               <Link href="/best">Best</Link>
               <Link href="/showls">Show ls</Link>
-              <Link href="/write">New Post</Link>
+              <Link href="/write">新規投稿</Link>
             </div>
           </div>
 
           <div className="flex items-center gap-4">
-            <span className="text-sm text-muted-foreground">Guest</span>
+            {me ? (
+              <>
+                <div className="flex items-center gap-2">
+                  {me.avatarUrl && (
+                    <img
+                      src={me.avatarUrl}
+                      alt={me.username}
+                      className="w-6 h-6 rounded-full"
+                    />
+                  )}
+                  <span className="text-sm">{me.username}</span>
+                </div>
+                <button
+                  type="button"
+                  className="text-sm hover:underline cursor-pointer"
+                  onClick={async () => {
+                    await fetch("/api/auth/signout", { method: "POST" });
+                    window.location.reload();
+                  }}
+                >
+                  ログアウト
+                </button>
+              </>
+            ) : (
+              <Link href="/api/auth/login">GitHubでログイン</Link>
+            )}
           </div>
         </div>
       </nav>

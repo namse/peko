@@ -1,19 +1,52 @@
+#[path = "pages/api/auth/callback/github.rs"]
+mod pages_api_auth_callback_github;
 #[path = "pages/index/mod.rs"]
 mod pages_index;
+#[allow(non_snake_case)]
 #[path = "pages/post/[id]/mod.rs"]
 mod pages_post__id_;
+#[path = "pages/write.rs"]
+mod pages_write;
 use forte_sdk::anyhow::Result;
-use forte_sdk::wstd::http::{Error, Request, Response, StatusCode, body::Body, HeaderMap};
-use forte_sdk::http::header::COOKIE;
+use forte_sdk::http::{Error, Request, Response, StatusCode, body::Body, HeaderMap};
+use forte_sdk::http_header::{COOKIE, LOCATION, SET_COOKIE};
 use forte_sdk::*;
 use std::collections::HashMap;
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[allow(non_camel_case_types)]
+pub enum Redirect {
+    External { url: String },
+    ApiAuthCallbackGithub,
+    Index,
+    Post_id_ { id: String },
+    Write,
+}
+impl Redirect {
+    pub fn to_path(&self) -> String {
+        match self {
+            Redirect::External { url } => url.clone(),
+            Redirect::ApiAuthCallbackGithub => "/api/auth/callback/github".to_string(),
+            Redirect::Index => "/".to_string(),
+            Redirect::Post_id_ { id } => {
+                format!("/{}", ["post".to_string(), id.to_string()].join("/"))
+            }
+            Redirect::Write => "/write".to_string(),
+        }
+    }
+}
+impl std::fmt::Display for Redirect {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Redirect to {}", self.to_path())
+    }
+}
+impl std::error::Error for Redirect {}
 #[forte_sdk::wstd::http_server]
 pub async fn main(request: Request<Body>) -> Result<Response<Body>, Error> {
     let (parts, _body) = request.into_parts();
     let headers = parts.headers;
     let path = parts.uri.path();
     let query = parts.uri.query().unwrap_or("");
-    let cookie_jar = make_cookie_jar(&headers);
+    let mut cookie_jar = make_cookie_jar(&headers);
     let query_params: HashMap<String, String> = query
         .split('&')
         .filter(|s| !s.is_empty())
@@ -24,42 +57,175 @@ pub async fn main(request: Request<Body>) -> Result<Response<Body>, Error> {
             Some((key.to_string(), value.to_string()))
         })
         .collect();
-    if path == "/" {
-        let after: Option<String> = query_params.get("after").cloned();
-        let search_params = pages_index::SearchParams { after };
-        match pages_index::handler(headers, cookie_jar, search_params).await {
+    let path_segments: Vec<&str> = path.trim_start_matches('/').split('/').collect();
+    if path == "/api/auth/callback/github" {
+        let Some(code) = query_params.get("code").cloned() else {
+            return Ok(
+                Response::builder()
+                    .status(StatusCode::BAD_REQUEST)
+                    .body(
+                        Body::from(
+                            format!("Missing required query parameter: {}", "code"),
+                        ),
+                    )
+                    .unwrap(),
+            );
+        };
+        let Some(state) = query_params.get("state").cloned() else {
+            return Ok(
+                Response::builder()
+                    .status(StatusCode::BAD_REQUEST)
+                    .body(
+                        Body::from(
+                            format!("Missing required query parameter: {}", "state"),
+                        ),
+                    )
+                    .unwrap(),
+            );
+        };
+        let search_params = pages_api_auth_callback_github::SearchParams {
+            code,
+            state,
+        };
+        match pages_api_auth_callback_github::handler(
+                headers,
+                &mut cookie_jar,
+                search_params,
+            )
+            .await
+        {
             Ok(props) => {
                 let stream = forte_json::to_stream(&props);
-                Ok(Response::new(Body::from_stream(stream)))
+                Ok(
+                    build_response_with_cookies(
+                        Response::new(Body::from_stream(stream)),
+                        &cookie_jar,
+                    ),
+                )
             }
             Err(e) => {
-                Ok(
-                    Response::builder()
-                        .status(StatusCode::INTERNAL_SERVER_ERROR)
-                        .body(Body::from(format!("Error: {:?}", e)))
-                        .unwrap(),
-                )
+                if let Some(redirect) = e.downcast_ref::<Redirect>() {
+                    Ok(
+                        build_response_with_cookies(
+                            Response::builder()
+                                .status(StatusCode::FOUND)
+                                .header(LOCATION, redirect.to_path())
+                                .body(Body::empty())
+                                .unwrap(),
+                            &cookie_jar,
+                        ),
+                    )
+                } else {
+                    Ok(
+                        Response::builder()
+                            .status(StatusCode::INTERNAL_SERVER_ERROR)
+                            .body(Body::from(format!("Error: {:?}", e)))
+                            .unwrap(),
+                    )
+                }
             }
         }
-    } else if {
-        let path_segments: Vec<&str> = path.trim_start_matches('/').split('/').collect();
-        path_segments.len() == 2usize && path_segments.get(0usize) == Some(&"post")
-    } {
-        let path_segments: Vec<&str> = path.trim_start_matches('/').split('/').collect();
-        let id: String = path_segments[1usize].to_string();
-        let path_params = pages_post__id_::PathParams { id };
-        match pages_post__id_::handler(headers, cookie_jar, path_params).await {
+    } else if path == "/" {
+        let after: Option<String> = query_params.get("after").cloned();
+        let search_params = pages_index::SearchParams { after };
+        match pages_index::handler(headers, &mut cookie_jar, search_params).await {
             Ok(props) => {
                 let stream = forte_json::to_stream(&props);
-                Ok(Response::new(Body::from_stream(stream)))
+                Ok(
+                    build_response_with_cookies(
+                        Response::new(Body::from_stream(stream)),
+                        &cookie_jar,
+                    ),
+                )
             }
             Err(e) => {
+                if let Some(redirect) = e.downcast_ref::<Redirect>() {
+                    Ok(
+                        build_response_with_cookies(
+                            Response::builder()
+                                .status(StatusCode::FOUND)
+                                .header(LOCATION, redirect.to_path())
+                                .body(Body::empty())
+                                .unwrap(),
+                            &cookie_jar,
+                        ),
+                    )
+                } else {
+                    Ok(
+                        Response::builder()
+                            .status(StatusCode::INTERNAL_SERVER_ERROR)
+                            .body(Body::from(format!("Error: {:?}", e)))
+                            .unwrap(),
+                    )
+                }
+            }
+        }
+    } else if path_segments.len() == 2usize && path_segments.first() == Some(&"post") {
+        let id: String = path_segments[1usize].to_string();
+        let path_params = pages_post__id_::PathParams { id };
+        match pages_post__id_::handler(headers, &mut cookie_jar, path_params).await {
+            Ok(props) => {
+                let stream = forte_json::to_stream(&props);
                 Ok(
-                    Response::builder()
-                        .status(StatusCode::INTERNAL_SERVER_ERROR)
-                        .body(Body::from(format!("Error: {:?}", e)))
-                        .unwrap(),
+                    build_response_with_cookies(
+                        Response::new(Body::from_stream(stream)),
+                        &cookie_jar,
+                    ),
                 )
+            }
+            Err(e) => {
+                if let Some(redirect) = e.downcast_ref::<Redirect>() {
+                    Ok(
+                        build_response_with_cookies(
+                            Response::builder()
+                                .status(StatusCode::FOUND)
+                                .header(LOCATION, redirect.to_path())
+                                .body(Body::empty())
+                                .unwrap(),
+                            &cookie_jar,
+                        ),
+                    )
+                } else {
+                    Ok(
+                        Response::builder()
+                            .status(StatusCode::INTERNAL_SERVER_ERROR)
+                            .body(Body::from(format!("Error: {:?}", e)))
+                            .unwrap(),
+                    )
+                }
+            }
+        }
+    } else if path == "/write" {
+        match pages_write::handler(headers, &mut cookie_jar).await {
+            Ok(props) => {
+                let stream = forte_json::to_stream(&props);
+                Ok(
+                    build_response_with_cookies(
+                        Response::new(Body::from_stream(stream)),
+                        &cookie_jar,
+                    ),
+                )
+            }
+            Err(e) => {
+                if let Some(redirect) = e.downcast_ref::<Redirect>() {
+                    Ok(
+                        build_response_with_cookies(
+                            Response::builder()
+                                .status(StatusCode::FOUND)
+                                .header(LOCATION, redirect.to_path())
+                                .body(Body::empty())
+                                .unwrap(),
+                            &cookie_jar,
+                        ),
+                    )
+                } else {
+                    Ok(
+                        Response::builder()
+                            .status(StatusCode::INTERNAL_SERVER_ERROR)
+                            .body(Body::from(format!("Error: {:?}", e)))
+                            .unwrap(),
+                    )
+                }
             }
         }
     } else {
@@ -84,4 +250,15 @@ fn make_cookie_jar(headers: &HeaderMap) -> cookie::CookieJar {
         jar.add_original(cookie.into_owned());
     }
     jar
+}
+fn build_response_with_cookies(
+    mut response: Response<Body>,
+    cookie_jar: &cookie::CookieJar,
+) -> Response<Body> {
+    for cookie in cookie_jar.delta() {
+        if let Ok(value) = cookie.encoded().to_string().parse() {
+            response.headers_mut().append(SET_COOKIE, value);
+        }
+    }
+    response
 }

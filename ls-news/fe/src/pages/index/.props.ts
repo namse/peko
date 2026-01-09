@@ -20,8 +20,6 @@ export const UserSchema = z.object({
     id: z.string(),
     username: z.string(),
     avatarUrl: z.string(),
-    createdAt: z.coerce.date(),
-    updatedAt: z.coerce.date(),
   });
 
 export type User = z.infer<typeof UserSchema>;
@@ -38,6 +36,7 @@ export const PropsSchema = z.discriminatedUnion("t", [
     z.object({
     t: z.literal("Ok"),
     rows: z.array(RowSchema),
+    me: UserSchema.optional(),
   }),
     z.object({
     t: z.literal("DbErr"),

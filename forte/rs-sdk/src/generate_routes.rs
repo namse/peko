@@ -262,6 +262,7 @@ fn discover_pages_recursive(base_dir: &Path, current_dir: &Path, pages: &mut Vec
 fn generate_code(pages: &[PageInfo]) -> TokenStream {
     let module_declarations = generate_module_declarations(pages);
     let route_matches = generate_route_matches(pages);
+    let redirect_enum = generate_redirect_enum(pages);
 
     let route_chain = if route_matches.is_empty() {
         quote! {
@@ -292,10 +293,12 @@ fn generate_code(pages: &[PageInfo]) -> TokenStream {
         #(#module_declarations)*
 
         use forte_sdk::anyhow::Result;
-        use forte_sdk::wstd::http::{Error, Request, Response, StatusCode, body::Body, HeaderMap};
-        use forte_sdk::http::header::COOKIE;
+        use forte_sdk::http::{Error, Request, Response, StatusCode, body::Body, HeaderMap};
+        use forte_sdk::http_header::{COOKIE, LOCATION, SET_COOKIE};
         use forte_sdk::*;
         use std::collections::HashMap;
+
+        #redirect_enum
 
         #[forte_sdk::wstd::http_server]
         pub async fn main(request: Request<Body>) -> Result<Response<Body>, Error> {
@@ -303,7 +306,7 @@ fn generate_code(pages: &[PageInfo]) -> TokenStream {
             let headers = parts.headers;
             let path = parts.uri.path();
             let query = parts.uri.query().unwrap_or("");
-            let cookie_jar = make_cookie_jar(&headers);
+            let mut cookie_jar = make_cookie_jar(&headers);
             let query_params: HashMap<String, String> = query
                 .split('&')
                 .filter(|s| !s.is_empty())
@@ -333,6 +336,15 @@ fn generate_code(pages: &[PageInfo]) -> TokenStream {
             }
 
             jar
+        }
+
+        fn build_response_with_cookies(mut response: Response<Body>, cookie_jar: &cookie::CookieJar) -> Response<Body> {
+            for cookie in cookie_jar.delta() {
+                if let Ok(value) = cookie.encoded().to_string().parse() {
+                    response.headers_mut().append(SET_COOKIE, value);
+                }
+            }
+            response
         }
     }
 }
@@ -405,16 +417,16 @@ fn generate_route_matches(pages: &[PageInfo]) -> Vec<TokenStream> {
             // Generate handler call based on what params exist
             let handler_call = match (&page.path_params, &page.search_params) {
                 (Some(_), Some(_)) => quote! {
-                    #module_name::handler(headers, cookie_jar, path_params, search_params).await
+                    #module_name::handler(headers, &mut cookie_jar, path_params, search_params).await
                 },
                 (Some(_), None) => quote! {
-                    #module_name::handler(headers, cookie_jar, path_params).await
+                    #module_name::handler(headers, &mut cookie_jar, path_params).await
                 },
                 (None, Some(_)) => quote! {
-                    #module_name::handler(headers, cookie_jar, search_params).await
+                    #module_name::handler(headers, &mut cookie_jar, search_params).await
                 },
                 (None, None) => quote! {
-                    #module_name::handler(headers, cookie_jar).await
+                    #module_name::handler(headers, &mut cookie_jar).await
                 },
             };
 
@@ -426,13 +438,24 @@ fn generate_route_matches(pages: &[PageInfo]) -> Vec<TokenStream> {
                     match #handler_call {
                         Ok(props) => {
                             let stream = forte_json::to_stream(&props);
-                            Ok(Response::new(Body::from_stream(stream)))
+                            Ok(build_response_with_cookies(Response::new(Body::from_stream(stream)), &cookie_jar))
                         }
                         Err(e) => {
-                            Ok(Response::builder()
-                                .status(StatusCode::INTERNAL_SERVER_ERROR)
-                                .body(Body::from(format!("Error: {:?}", e)))
-                                .unwrap())
+                            if let Some(redirect) = e.downcast_ref::<Redirect>() {
+                                Ok(build_response_with_cookies(
+                                    Response::builder()
+                                        .status(StatusCode::FOUND)
+                                        .header(LOCATION, redirect.to_path())
+                                        .body(Body::empty())
+                                        .unwrap(),
+                                    &cookie_jar,
+                                ))
+                            } else {
+                                Ok(Response::builder()
+                                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                                    .body(Body::from(format!("Error: {:?}", e)))
+                                    .unwrap())
+                            }
                         }
                     }
                 }
@@ -448,7 +471,11 @@ fn generate_dynamic_route_condition(segments: &[RouteSegment]) -> TokenStream {
         .enumerate()
         .filter_map(|(i, seg)| {
             if let RouteSegment::Static(s) = seg {
-                Some(quote! { path_segments.get(#i) == Some(&#s) })
+                if i == 0 {
+                    Some(quote! { path_segments.first() == Some(&#s) })
+                } else {
+                    Some(quote! { path_segments.get(#i) == Some(&#s) })
+                }
             } else {
                 None // Dynamic segments match anything
             }
@@ -564,6 +591,121 @@ fn generate_search_field_parsers(fields: &[SearchParamField]) -> Vec<TokenStream
                         }
                     };
                 }
+            }
+        })
+        .collect()
+}
+
+fn generate_redirect_enum(pages: &[PageInfo]) -> TokenStream {
+    let variants: Vec<TokenStream> = pages
+        .iter()
+        .map(|page| {
+            let variant_name = page_to_variant_name(&page.route_segments);
+            let variant_ident = format_ident!("{}", variant_name);
+
+            if let Some(path_params) = &page.path_params {
+                let fields: Vec<TokenStream> = path_params
+                    .iter()
+                    .map(|p| {
+                        let name = format_ident!("{}", p.name);
+                        let ty: TokenStream = p.inner_type.parse().unwrap();
+                        quote! { #name: #ty }
+                    })
+                    .collect();
+                quote! { #variant_ident { #(#fields),* } }
+            } else {
+                quote! { #variant_ident }
+            }
+        })
+        .collect();
+
+    let to_path_arms: Vec<TokenStream> = pages
+        .iter()
+        .map(|page| {
+            let variant_name = page_to_variant_name(&page.route_segments);
+            let variant_ident = format_ident!("{}", variant_name);
+
+            if let Some(path_params) = &page.path_params {
+                let field_names: Vec<_> = path_params
+                    .iter()
+                    .map(|p| format_ident!("{}", p.name))
+                    .collect();
+
+                // Build path with dynamic segments
+                let path_parts: Vec<TokenStream> = page
+                    .route_segments
+                    .iter()
+                    .map(|seg| match seg {
+                        RouteSegment::Static(s) => quote! { #s.to_string() },
+                        RouteSegment::Dynamic(name) => {
+                            let name_ident = format_ident!("{}", name);
+                            quote! { #name_ident.to_string() }
+                        }
+                    })
+                    .collect();
+
+                quote! {
+                    Redirect::#variant_ident { #(#field_names),* } => {
+                        format!("/{}", [#(#path_parts),*].join("/"))
+                    }
+                }
+            } else {
+                let route_path = &page.route_path;
+                quote! {
+                    Redirect::#variant_ident => #route_path.to_string()
+                }
+            }
+        })
+        .collect();
+
+    quote! {
+        #[derive(Debug, serde::Serialize, serde::Deserialize)]
+        #[allow(non_camel_case_types)]
+        pub enum Redirect {
+            External { url: String },
+            #(#variants),*
+        }
+
+        impl Redirect {
+            pub fn to_path(&self) -> String {
+                match self {
+                    Redirect::External { url } => url.clone(),
+                    #(#to_path_arms),*
+                }
+            }
+        }
+
+        impl std::fmt::Display for Redirect {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "Redirect to {}", self.to_path())
+            }
+        }
+
+        impl std::error::Error for Redirect {}
+    }
+}
+
+fn page_to_variant_name(segments: &[RouteSegment]) -> String {
+    // /post -> Post
+    // /post/id (static) -> PostId
+    // /post/[id] -> Post_id_
+    // /post/[id]/comment -> Post_id_Comment
+    if segments.is_empty() {
+        return "Index".to_string();
+    }
+
+    segments
+        .iter()
+        .map(|seg| match seg {
+            RouteSegment::Static(s) => {
+                let mut chars = s.chars();
+                match chars.next() {
+                    None => String::new(),
+                    Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+                }
+            }
+            RouteSegment::Dynamic(name) => {
+                format!("_{}_", name)
             }
         })
         .collect()

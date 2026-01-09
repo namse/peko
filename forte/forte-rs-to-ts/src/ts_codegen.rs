@@ -9,6 +9,7 @@ pub enum TsType {
     Tuple(Vec<TsType>),
     DiscriminatedUnion(String, Vec<TsType>),
     Object(Vec<TsField>),
+    Record(Box<TsType>),
     Undefined(Box<TsType>),
     Reference(String),
 }
@@ -65,6 +66,7 @@ pub fn to_zod(ty: &TsType) -> String {
             s.push_str("  })");
             s
         }
+        TsType::Record(inner) => format!("z.record(z.string(), {})", to_zod(inner)),
         TsType::Undefined(inner) => format!("{}.optional()", to_zod(inner)),
         TsType::Reference(name) => format!("{name}Schema"),
     }
@@ -113,6 +115,7 @@ impl fmt::Display for TsType {
                 }
                 write!(f, " }}")
             }
+            TsType::Record(inner) => write!(f, "Record<string, {}>", inner),
             TsType::Undefined(inner) => write!(f, "{} | undefined", inner),
             TsType::Reference(name) => write!(f, "{name}"),
         }

@@ -1,5 +1,12 @@
 # Claude Code Guidelines for ls-news
 
+## Page Development Flow
+
+페이지 개발 순서:
+1. `rs/src/pages/` 에서 props를 return하는 handler 구현
+2. `../forte/forte-rs-to-fe` 에서 `cargo run` 실행하여 fe쪽에 `.props.ts` 자동생성
+3. `fe/src/pages/.../page.tsx` 에서 `export default function PageName(props: Props) {...}` 구현
+
 ## Frontend (React/TypeScript)
 
 ### Component Props

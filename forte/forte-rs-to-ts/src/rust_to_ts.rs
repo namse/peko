@@ -56,11 +56,7 @@ impl<'tcx> TypeConverter<'tcx> {
                     || self.is_std_type(adt_def, "BTreeMap")
                 {
                     let val_ty = substs[1].expect_ty();
-                    TsType::Object(vec![TsField {
-                        name: "[key: string]".to_string(),
-                        ty: self.convert_type(val_ty, context),
-                        is_optional: false,
-                    }])
+                    TsType::Record(Box::new(self.convert_type(val_ty, context)))
                 } else if self.is_std_type(adt_def, "HashSet")
                     || self.is_std_type(adt_def, "BTreeSet")
                 {
@@ -100,6 +96,9 @@ impl<'tcx> TypeConverter<'tcx> {
             || def_path == format!("alloc::vec::{}", name)
             || def_path == format!("std::collections::hash::map::{}", name)
             || def_path == format!("std::collections::hash::set::{}", name)
+            || def_path == format!("std::collections::{}", name) // std::collections::HashMap
+            || def_path == format!("hashbrown::map::{}", name) // hashbrown::map::HashMap
+            || def_path == format!("hashbrown::{}", name) // hashbrown::HashMap
             || def_path == format!("std::collections::btree::map::{}", name)
             || def_path == format!("std::collections::btree::set::{}", name)
             || def_path == format!("alloc::collections::btree::map::{}", name)

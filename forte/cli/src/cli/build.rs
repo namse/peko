@@ -155,6 +155,10 @@ fn path_to_route(base_dir: &Path, file_path: &Path) -> Option<(String, String)> 
         }
     }
 
+    if route_path.starts_with("/api/") {
+        return None;
+    }
+
     let fe_page_path = build_fe_page_path(&route_path);
 
     Some((route_path, fe_page_path))
