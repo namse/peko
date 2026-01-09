@@ -47,6 +47,33 @@ struct PathParamField {
     inner_type: String,
 }
 
+fn has_handler(content: &str) -> bool {
+    let Ok(syntax_tree) = syn::parse_file(content) else {
+        return false;
+    };
+
+    for item in syntax_tree.items {
+        if let syn::Item::Fn(func) = item {
+            // Check: pub async fn handler
+            let is_pub = matches!(func.vis, syn::Visibility::Public(_));
+            let is_async = func.sig.asyncness.is_some();
+            let is_handler = func.sig.ident == "handler";
+
+            if is_pub && is_async && is_handler {
+                // Check return type is Result<Props>
+                if let syn::ReturnType::Type(_, ty) = &func.sig.output {
+                    let type_str = quote!(#ty).to_string();
+                    if type_str.contains("Result") && type_str.contains("Props") {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+
+    false
+}
+
 fn parse_search_params(content: &str) -> Option<Vec<SearchParamField>> {
     let syntax_tree = syn::parse_file(content).ok()?;
 
@@ -134,18 +161,54 @@ fn discover_pages_recursive(base_dir: &Path, current_dir: &Path, pages: &mut Vec
         let path = entry.path();
 
         if path.is_dir() {
-            let mod_rs = path.join("mod.rs");
-            if mod_rs.exists() {
-                let relative_path = path.strip_prefix(base_dir).unwrap();
-                let path_segments: Vec<_> = relative_path
-                    .components()
-                    .map(|c| c.as_os_str().to_string_lossy().to_string())
-                    .collect();
+            // Recurse into subdirectories
+            discover_pages_recursive(base_dir, &path, pages);
+        } else if path.extension().map(|e| e == "rs").unwrap_or(false) {
+            // Check if this .rs file has a handler
+            let Some(content) = fs::read_to_string(&path).ok() else {
+                continue;
+            };
 
-                // module_name: [id] -> _id_ for valid identifier
-                let module_name = format!(
+            if !has_handler(&content) {
+                continue;
+            }
+
+            // Build route info from file path
+            let relative_path = path.strip_prefix(base_dir).unwrap();
+            let file_name = path.file_stem().unwrap().to_string_lossy().to_string();
+            let parent_segments: Vec<_> = relative_path
+                .parent()
+                .map(|p| {
+                    p.components()
+                        .map(|c| c.as_os_str().to_string_lossy().to_string())
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            // Determine route segments
+            // - index.rs or mod.rs -> use parent path only
+            // - other.rs -> use parent path + filename
+            let mut route_segments: Vec<String> = if file_name == "index" || file_name == "mod" {
+                parent_segments.clone()
+            } else {
+                let mut segments = parent_segments.clone();
+                segments.push(file_name.clone());
+                segments
+            };
+
+            // Remove trailing "index" from route segments
+            // e.g., ["index"] -> [], ["post", "index"] -> ["post"]
+            if route_segments.last() == Some(&"index".to_string()) {
+                route_segments.pop();
+            }
+
+            // Generate module name (valid Rust identifier)
+            let module_name = if route_segments.is_empty() {
+                "pages_index".to_string()
+            } else {
+                format!(
                     "pages_{}",
-                    path_segments
+                    route_segments
                         .iter()
                         .map(|s| {
                             if s.starts_with('[') && s.ends_with(']') {
@@ -156,45 +219,42 @@ fn discover_pages_recursive(base_dir: &Path, current_dir: &Path, pages: &mut Vec
                         })
                         .collect::<Vec<_>>()
                         .join("_")
-                );
-                let module_path = format!("pages/{}/mod.rs", path_segments.join("/"));
-                let route_path = if path_segments == vec!["index"] {
-                    "/".to_string()
-                } else {
-                    format!("/{}", path_segments.join("/"))
-                };
+                )
+            };
 
-                // Parse route segments for pattern matching
-                let route_segments: Vec<RouteSegment> = path_segments
-                    .iter()
-                    .map(|s| {
-                        if s.starts_with('[') && s.ends_with(']') {
-                            RouteSegment::Dynamic(s[1..s.len() - 1].to_string())
-                        } else {
-                            RouteSegment::Static(s.clone())
-                        }
-                    })
-                    .collect();
+            // Generate module path (actual file path)
+            let module_path = format!("pages/{}", relative_path.to_string_lossy());
 
-                let content = fs::read_to_string(&mod_rs).ok();
-                let search_params = content
-                    .as_ref()
-                    .and_then(|c| parse_search_params(c));
-                let path_params = content
-                    .as_ref()
-                    .and_then(|c| parse_path_params(c));
+            // Generate route path
+            let route_path = if route_segments.is_empty() {
+                "/".to_string()
+            } else {
+                format!("/{}", route_segments.join("/"))
+            };
 
-                pages.push(PageInfo {
-                    module_name,
-                    module_path,
-                    route_path,
-                    route_segments,
-                    path_params,
-                    search_params,
-                });
-            }
+            // Parse route segments for pattern matching
+            let parsed_route_segments: Vec<RouteSegment> = route_segments
+                .iter()
+                .map(|s| {
+                    if s.starts_with('[') && s.ends_with(']') {
+                        RouteSegment::Dynamic(s[1..s.len() - 1].to_string())
+                    } else {
+                        RouteSegment::Static(s.clone())
+                    }
+                })
+                .collect();
 
-            discover_pages_recursive(base_dir, &path, pages);
+            let search_params = parse_search_params(&content);
+            let path_params = parse_path_params(&content);
+
+            pages.push(PageInfo {
+                module_name,
+                module_path,
+                route_path,
+                route_segments: parsed_route_segments,
+                path_params,
+                search_params,
+            });
         }
     }
 }
@@ -214,6 +274,7 @@ fn generate_code(pages: &[PageInfo]) -> TokenStream {
         let first = &route_matches[0];
         let rest = &route_matches[1..];
         quote! {
+            let path_segments: Vec<&str> = path.trim_start_matches('/').split('/').collect();
             #first
             #(else #rest)*
             else {
@@ -283,7 +344,14 @@ fn generate_module_declarations(pages: &[PageInfo]) -> Vec<TokenStream> {
             let module_name = format_ident!("{}", page.module_name);
             let module_path = &page.module_path;
 
+            let allow_attr = if has_dynamic_segments(&page.route_segments) {
+                quote! { #[allow(non_snake_case)] }
+            } else {
+                quote! {}
+            };
+
             quote! {
+                #allow_attr
                 #[path = #module_path]
                 mod #module_name;
             }
@@ -310,6 +378,7 @@ fn generate_route_matches(pages: &[PageInfo]) -> Vec<TokenStream> {
                 let route_path = &page.route_path;
                 quote! { path == #route_path }
             };
+
 
             // Generate path params extraction (if dynamic)
             let path_params_extraction = if page.path_params.is_some() {
@@ -388,17 +457,11 @@ fn generate_dynamic_route_condition(segments: &[RouteSegment]) -> TokenStream {
 
     if segment_checks.is_empty() {
         quote! {
-            {
-                let path_segments: Vec<&str> = path.trim_start_matches('/').split('/').collect();
-                path_segments.len() == #segment_count
-            }
+            path_segments.len() == #segment_count
         }
     } else {
         quote! {
-            {
-                let path_segments: Vec<&str> = path.trim_start_matches('/').split('/').collect();
-                path_segments.len() == #segment_count && #(#segment_checks)&&*
-            }
+            path_segments.len() == #segment_count && #(#segment_checks)&&*
         }
     }
 }
@@ -447,7 +510,6 @@ fn generate_path_params_extraction(
         .collect();
 
     quote! {
-        let path_segments: Vec<&str> = path.trim_start_matches('/').split('/').collect();
         #(#extractions)*
         let path_params = #module_name::PathParams { #(#field_names),* };
     }
